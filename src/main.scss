@@ -1,0 +1,159 @@
+$mdc-theme-primary: #6F8795;
+$mdc-theme-secondary: #F1A948;
+$mdc-theme-on-primary: #fff;
+$mdc-theme-on-secondary: #fff;
+
+@import "@material/button/mdc-button";
+@import "@material/card/mdc-card";
+@import "@material/checkbox/mdc-checkbox";
+@import "@material/dialog/mdc-dialog";
+@import "@material/elevation/mdc-elevation";
+@import "@material/fab/mdc-fab";
+@import "@material/form-field/mdc-form-field";
+@import "@material/layout-grid/mdc-layout-grid";
+@import "@material/linear-progress/mdc-linear-progress";
+@import "@material/list/mdc-list";
+@import "@material/radio/mdc-radio";
+@import "@material/select/mdc-select";
+@import "@material/textfield/mdc-text-field";
+@import "@material/textfield/helper-text/mdc-text-field-helper-text";
+@import "@material/top-app-bar/mdc-top-app-bar";
+@import "@material/typography/mdc-typography";
+
+.welcome-panel {
+  padding-top: 100px;
+  text-align: center;
+}
+
+.card__primary {
+  padding: 1rem;
+}
+
+.card__title {
+  margin: 0;
+}
+
+.fab__white {
+  @include mdc-fab-accessible(#fff);
+}
+
+.fab--absolute--prominent--top {
+  position: fixed;
+  top: 108px;
+  left: 20px;
+  z-index: 5;
+}
+
+.search-criteria-list-group {
+  margin-top: 40px;
+}
+
+p {
+  @include mdc-typography(body1);
+}
+
+.text-center {
+  text-align: center;
+}
+
+p.not-found {
+  @include mdc-typography(headline1);
+  text-align: center;
+  color: #aaa;
+}
+
+p.slow {
+  @include mdc-typography(headline3);
+  text-align: center;
+  color: #aaa;
+}
+
+.button-list-group {
+  margin-left: 1rem;
+}
+
+.form-field-container {
+  display: block;
+}
+
+/* Circular Progress */
+
+@keyframes rotate {
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes dash {
+  0% {
+    stroke-dasharray: 1, 200;
+    stroke-dashoffset: 0;
+  }
+
+  50% {
+    stroke-dasharray: 89, 200;
+    stroke-dashoffset: -35;
+  }
+
+  100% {
+    stroke-dasharray: 89, 200;
+    stroke-dashoffset: -124;
+  }
+}
+
+.mdc-circular-progress {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  animation: rotate 2s linear infinite;
+
+  &__path {
+    stroke-dasharray: 1, 200;
+    stroke-dashoffset: 0;
+    animation: dash 1.5s ease-in-out infinite, color 6s ease-in-out infinite;
+    stroke-linecap: round;
+    @include mdc-theme-prop(stroke, primary);
+  }
+}
+
+.mdc-button .mdc-circular-progress {
+  width: 24px;
+  height: 24px;
+}
+
+.mdc-button .mdc-circular-progress__path {
+  stroke: white;
+}
+
+.label-disabled {
+  color: rgba(0, 0, 0, 0.26);
+}
+
+.bound-placeholder {
+  height: 75px;
+}
+
+.bound-placeholder:not(:last-child), .bound-input:not(:last-child) {
+  margin-bottom: 1rem;
+}
+
+.query-type-select {
+  display: block;
+  margin-bottom: 1rem;
+}
+
+.mdc-dialog__surface--constant-width {
+  width: calc(100vw - 32px);
+}
+
+.mdc-text-field-helper-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.criteria-group__title {
+  @include mdc-typography(headline6);
+  margin: 0;
+  padding: 1rem 1rem 0;
+}
