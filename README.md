@@ -8,6 +8,24 @@ This project contains a prototype of a Samply Broker UI which uses [Material Des
 * Docker based build for a maximum of reproducibility and independence from different environments
 * customizable at deploy time through environment variables
 
+## Usage
+
+To start the UI including the search store which is needed to persist the searches, this project contains a Docker compose file with the complete setup. 
+
+Clone this Git repository, if you haven't already:
+
+```bash
+git clone https://github.com/alexanderkiel/samply.broker.ui.material.git
+```
+
+Make sure you have port 8080 free or edit the `docker-compose.yml` before brining the system up with:
+
+```bash
+docker-compose up
+```
+
+Point your browser to: [http://localhost:8080](http://localhost:8080).
+
 ## Build
 
 The build is Docker based. Just run:
@@ -19,8 +37,8 @@ docker build .
 ## Development
 
 * install [npm][2]
-* run `npm install`
-* run `npm run-script dev`
+* run `npm install` to install the required node packages
+* run `npm run-script dev` to run an interactive development environment with hot reloading
 * open [http://localhost:3000](http://localhost:3000) in your browser
 
 ## License

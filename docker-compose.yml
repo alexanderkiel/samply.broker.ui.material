@@ -1,0 +1,14 @@
+version: '3.2'
+services:
+  search-store:
+    image: akiel/samply.broker.search.store:latest
+    environment:
+      PORT: "80"
+      DATABASE_URI: "datomic:mem://store"
+    restart: always
+  ui:
+    image: akiel/samply.broker.ui.material:latest
+    environment:
+      SERVICE_URI: "http://search-store"
+    ports:
+    - "8080:80"
