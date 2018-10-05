@@ -10,5 +10,6 @@ services:
     image: akiel/samply.broker.ui.material:latest
     environment:
       SERVICE_URI: "http://search-store"
+      MDR_ROOT: "https://mdr.germanbiobanknode.de/v3/api/mdr"
     ports:
     - "8080:80"

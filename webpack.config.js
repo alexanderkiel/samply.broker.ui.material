@@ -79,7 +79,10 @@ module.exports = (env, argv) => {
         return {
             plugins: [
                 new webpack.HotModuleReplacementPlugin(),
-                html
+                html,
+                new webpack.ProvidePlugin({
+                    'flags': '../flags.dev.js'
+                })
             ],
 
             output: devOutput,

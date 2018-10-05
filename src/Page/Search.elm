@@ -45,11 +45,11 @@ type Model
 
 
 type LoadingModel
-    = Start
-    | SearchLoaded SearchModel
-    | SearchLoadingFailed Request.Error
-    | GroupsLoaded (Dict Urn Group)
-    | GroupLoadingFailed Request.Error
+    = Start String
+    | SearchLoaded String SearchModel
+    | SearchLoadingFailed String Request.Error
+    | GroupsLoaded String (Dict Urn Group)
+    | GroupLoadingFailed String Request.Error
 
 
 type alias SearchModel =
@@ -80,7 +80,8 @@ type alias Group =
 
 
 type alias LoadedModel =
-    { search : SearchModel
+    { mdrRoot : String
+    , search : SearchModel
     , groups : Dict Urn Group
     , openDialogRef : Maybe DialogRef
     , dialogActionInProgress : Bool
@@ -98,8 +99,9 @@ type alias FailedModel =
     }
 
 
-initLoadedModel search groups =
-    { search = search
+initLoadedModel mdrRoot search groups =
+    { mdrRoot = mdrRoot
+    , search = search
     , groups = groups
     , openDialogRef = Nothing
     , dialogActionInProgress = False
@@ -129,21 +131,21 @@ initCriterionDetail elementDetail query =
     }
 
 
-init : Id -> ( Model, Cmd Msg )
-init id =
-    ( NormalLoading Start
+init : String -> Id -> ( Model, Cmd Msg )
+init mdrRoot id =
+    ( NormalLoading <| Start mdrRoot
     , Cmd.batch
         [ Request.Search.search id
             |> Task.attempt (SearchResult >> StartMsg)
-        , loadNamespaceMembers "mdr16"
+        , loadNamespaceMembers mdrRoot "mdr16"
         , Task.perform (\_ -> PassedSlowLoadThreshold) LoadingStatus.slowThreshold
         ]
     )
 
 
-loadNamespaceMembers : String -> Cmd Msg
-loadNamespaceMembers name =
-    Request.Mdr.namespaceMembers name
+loadNamespaceMembers : String -> String -> Cmd Msg
+loadNamespaceMembers mdrRoot name =
+    Request.Mdr.namespaceMembers mdrRoot name
         |> Task.attempt (GroupsResult >> StartMsg)
 
 
@@ -256,9 +258,9 @@ update msg model =
 
                         updateLoadingModel lift loadingModel =
                             case loadingModel of
-                                GroupsLoaded groups ->
+                                GroupsLoaded mdrRoot groups ->
                                     setGroupElements groupId relevantMembers groups
-                                        |> GroupsLoaded
+                                        |> GroupsLoaded mdrRoot
                                         |> lift
 
                                 -- Ignore elements here, because we are at least
@@ -314,11 +316,11 @@ isDataElementRelevant { id } =
 
 markAsSlowLoading loadingModel =
     case loadingModel of
-        SearchLoaded search ->
-            SearchLoaded <| markSearchModelAsSlowLoading search
+        SearchLoaded mdrRoot search ->
+            SearchLoaded mdrRoot <| markSearchModelAsSlowLoading search
 
-        GroupsLoaded groups ->
-            GroupsLoaded <| markGroupsAsSlowLoading groups
+        GroupsLoaded mdrRoot groups ->
+            GroupsLoaded mdrRoot <| markGroupsAsSlowLoading groups
 
         _ ->
             loadingModel
@@ -376,10 +378,10 @@ addElementDetail elementId elementDetail model =
 
         updateLoadingModel lift loadingModel =
             case loadingModel of
-                SearchLoaded search ->
+                SearchLoaded mdrRoot search ->
                     search
                         |> insertElementDetail
-                        |> SearchLoaded
+                        |> SearchLoaded mdrRoot
                         |> lift
 
                 -- Ignore elements here, because we are at least in
@@ -429,48 +431,48 @@ updateAtStart msg model loadingTag =
                             initSearchModel search
                       in
                       case model of
-                        Start ->
+                        Start mdrRoot ->
                             searchModel
-                                |> SearchLoaded
+                                |> SearchLoaded mdrRoot
                                 |> StillLoading
 
-                        SearchLoaded _ ->
+                        SearchLoaded _ _ ->
                             StillLoading model
 
-                        SearchLoadingFailed _ ->
+                        SearchLoadingFailed mdrRoot _ ->
                             searchModel
-                                |> SearchLoaded
+                                |> SearchLoaded mdrRoot
                                 |> StillLoading
 
-                        GroupsLoaded groups ->
-                            initLoadedModel searchModel groups
+                        GroupsLoaded mdrRoot groups ->
+                            initLoadedModel mdrRoot searchModel groups
                                 |> FinishedLoading
 
-                        GroupLoadingFailed _ ->
+                        GroupLoadingFailed mdrRoot _ ->
                             searchModel
-                                |> SearchLoaded
+                                |> SearchLoaded mdrRoot
                                 |> StillLoading
                     , search.criteria
-                        |> List.map (.mdrKey >> loadElementDetail)
+                        |> List.map (.mdrKey >> (loadElementDetail <| getMdrRoot model))
                         |> Cmd.batch
                     )
 
                 Err error ->
                     ( case model of
-                        Start ->
-                            StillLoading <| SearchLoadingFailed error
+                        Start mdrRoot ->
+                            StillLoading <| SearchLoadingFailed mdrRoot error
 
-                        SearchLoaded _ ->
+                        SearchLoaded _ _ ->
                             StillLoading <| model
 
-                        SearchLoadingFailed _ ->
-                            StillLoading <| SearchLoadingFailed error
+                        SearchLoadingFailed mdrRoot _ ->
+                            StillLoading <| SearchLoadingFailed mdrRoot error
 
-                        GroupsLoaded groups ->
-                            StillLoading <| SearchLoadingFailed error
+                        GroupsLoaded mdrRoot groups ->
+                            StillLoading <| SearchLoadingFailed mdrRoot error
 
-                        GroupLoadingFailed _ ->
-                            StillLoading <| SearchLoadingFailed error
+                        GroupLoadingFailed mdrRoot _ ->
+                            StillLoading <| SearchLoadingFailed mdrRoot error
                     , Cmd.none
                     )
 
@@ -488,50 +490,69 @@ updateAtStart msg model loadingTag =
                                         ( id
                                         , { group = group
                                           , loadingMembers = loadingTag
-                                          , addGroupCriterionDialog = AddGroupCriterionDialog.init []
+                                          , addGroupCriterionDialog = AddGroupCriterionDialog.init (getMdrRoot model) []
                                           }
                                         )
                                     )
                                 |> Dict.fromList
                     in
                     ( case model of
-                        Start ->
-                            StillLoading <| GroupsLoaded groups
+                        Start mdrRoot ->
+                            StillLoading <| GroupsLoaded mdrRoot groups
 
-                        SearchLoaded search ->
-                            FinishedLoading <| initLoadedModel search groups
+                        SearchLoaded mdrRoot search ->
+                            FinishedLoading <| initLoadedModel mdrRoot search groups
 
-                        SearchLoadingFailed _ ->
-                            StillLoading <| GroupsLoaded groups
+                        SearchLoadingFailed mdrRoot _ ->
+                            StillLoading <| GroupsLoaded mdrRoot groups
 
-                        GroupsLoaded _ ->
+                        GroupsLoaded _ _ ->
                             StillLoading <| model
 
-                        GroupLoadingFailed _ ->
-                            StillLoading <| GroupsLoaded groups
+                        GroupLoadingFailed mdrRoot _ ->
+                            StillLoading <| GroupsLoaded mdrRoot groups
                     , relevantGroups
-                        |> List.map (.id >> loadDataElementGroupMembers)
+                        |> List.map (.id >> (loadDataElementGroupMembers <| getMdrRoot model))
                         |> Cmd.batch
                     )
 
                 Err error ->
                     ( case model of
-                        Start ->
-                            StillLoading <| GroupLoadingFailed error
+                        Start mdrRoot ->
+                            StillLoading <| GroupLoadingFailed mdrRoot error
 
-                        SearchLoaded _ ->
-                            StillLoading <| GroupLoadingFailed error
+                        SearchLoaded mdrRoot _ ->
+                            StillLoading <| GroupLoadingFailed mdrRoot error
 
-                        SearchLoadingFailed _ ->
-                            StillLoading <| GroupLoadingFailed error
+                        SearchLoadingFailed mdrRoot _ ->
+                            StillLoading <| GroupLoadingFailed mdrRoot error
 
-                        GroupsLoaded groups ->
+                        GroupsLoaded _ _ ->
                             StillLoading <| model
 
-                        GroupLoadingFailed _ ->
-                            StillLoading <| GroupLoadingFailed error
+                        GroupLoadingFailed mdrRoot _ ->
+                            StillLoading <| GroupLoadingFailed mdrRoot error
                     , Cmd.none
                     )
+
+
+getMdrRoot : LoadingModel -> String
+getMdrRoot model =
+    case model of
+        Start mdrRoot ->
+            mdrRoot
+
+        SearchLoaded mdrRoot _ ->
+            mdrRoot
+
+        SearchLoadingFailed mdrRoot _ ->
+            mdrRoot
+
+        GroupsLoaded mdrRoot _ ->
+            mdrRoot
+
+        GroupLoadingFailed mdrRoot _ ->
+            mdrRoot
 
 
 {-| Update function which is used after essential data is loaded.
@@ -545,7 +566,7 @@ updateAfterLoading msg model =
             )
 
         OpenAddGroupCriterionDialog groupId ->
-            ( (updateGroup groupId (initAddGroupCriterionDialogModel model.search)
+            ( (updateGroup groupId (initAddGroupCriterionDialogModel model.mdrRoot model.search)
                 >> openDialog (AddGroupCriterionDialogRef groupId)
               )
                 model
@@ -644,14 +665,14 @@ closeDialog model =
     { model | openDialogRef = Nothing, dialogActionInProgress = False }
 
 
-initAddGroupCriterionDialogModel : SearchModel -> Group -> Group
-initAddGroupCriterionDialogModel { criteria } group =
+initAddGroupCriterionDialogModel : String -> SearchModel -> Group -> Group
+initAddGroupCriterionDialogModel mdrRoot { criteria } group =
     let
         usedMdrKeys =
             List.map .mdrKey criteria
 
         dialog =
-            AddGroupCriterionDialog.init usedMdrKeys
+            AddGroupCriterionDialog.init mdrRoot usedMdrKeys
     in
     { group | addGroupCriterionDialog = dialog }
 
@@ -806,15 +827,15 @@ relevantGroup { id } =
     List.member id relevantGroupIds
 
 
-loadDataElementGroupMembers : Urn -> Cmd Msg
-loadDataElementGroupMembers groupId =
-    Request.Mdr.dataElementGroupMembers groupId
+loadDataElementGroupMembers : String -> Urn -> Cmd Msg
+loadDataElementGroupMembers mdrRoot groupId =
+    Request.Mdr.dataElementGroupMembers mdrRoot groupId
         |> Task.attempt (DataElementGroupMembersLoaded groupId)
 
 
-loadElementDetail : Urn -> Cmd Msg
-loadElementDetail elementId =
-    Request.Mdr.dataElement elementId
+loadElementDetail : String -> Urn -> Cmd Msg
+loadElementDetail mdrRoot elementId =
+    Request.Mdr.dataElement mdrRoot elementId
         |> Task.attempt (DataElementDetailLoaded elementId)
 
 

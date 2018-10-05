@@ -36,7 +36,11 @@ import Task
 
 
 type Model
-    = SelectItem { usedMdrKeys : List Urn, selectedItemId : Maybe Urn }
+    = SelectItem
+        { mdrRoot : String
+        , usedMdrKeys : List Urn
+        , selectedItemId : Maybe Urn
+        }
     | LoadingDataElementDetail Urn
     | LoadingDataElementDetailSlowly Urn
     | CreateCriterion CriterionForm.Model
@@ -48,9 +52,13 @@ type Model
     disabled, so that the user can't select one data element twice.
 
 -}
-init : List Urn -> Model
-init usedMdrKeys =
-    SelectItem { usedMdrKeys = usedMdrKeys, selectedItemId = Nothing }
+init : String -> List Urn -> Model
+init mdrRoot usedMdrKeys =
+    SelectItem
+        { mdrRoot = mdrRoot
+        , usedMdrKeys = usedMdrKeys
+        , selectedItemId = Nothing
+        }
 
 
 
@@ -79,12 +87,18 @@ update msg model =
                     ( model, Cmd.none )
 
         Next selectedItemId ->
-            ( LoadingDataElementDetail selectedItemId
-            , Cmd.batch
-                [ loadElementDetail selectedItemId
-                , Task.perform (\_ -> PassedSlowLoadThreshold) LoadingStatus.slowThreshold
-                ]
-            )
+            case model of
+                SelectItem { mdrRoot } ->
+                    ( LoadingDataElementDetail selectedItemId
+                    , Cmd.batch
+                        [ loadElementDetail mdrRoot selectedItemId
+                        , Task.perform (\_ -> PassedSlowLoadThreshold)
+                            LoadingStatus.slowThreshold
+                        ]
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
 
         DataElementDetailLoaded elementId result ->
             case result of
@@ -119,9 +133,9 @@ update msg model =
                     ( model, Cmd.none )
 
 
-loadElementDetail : Urn -> Cmd Msg
-loadElementDetail elementId =
-    Request.Mdr.dataElement elementId
+loadElementDetail : String -> Urn -> Cmd Msg
+loadElementDetail mdrRoot elementId =
+    Request.Mdr.dataElement mdrRoot elementId
         |> Task.attempt (DataElementDetailLoaded elementId)
 
 

@@ -4,7 +4,7 @@ require('./main.scss');
 
 let elm = require('./Main.elm');
 
-let app = elm.Elm.Main.init();
+let app = elm.Elm.Main.init({flags: flags});
 
 /*app.ports.sendMsg.subscribe(function (msg) {
     switch (msg.tag) {

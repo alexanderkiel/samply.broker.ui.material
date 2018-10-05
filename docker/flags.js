@@ -1,0 +1,3 @@
+flags = {
+    mdrRoot: '<mdr-root>'
+};

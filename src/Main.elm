@@ -6,6 +6,7 @@ import Data.Search as Search
 import Html exposing (Html)
 import Html.Attributes exposing (class, href)
 import Json.Decode as Decode exposing (Decoder, Value)
+import Json.Decode.Pipeline exposing (required)
 import Material.Button as Button
 import Material.Card as Card
 import Material.LayoutGrid as LayoutGrid
@@ -43,11 +44,11 @@ initHomePage routeKey =
     ( Home model, Cmd.map HomeMsg cmd )
 
 
-initSearchPage : Search.Id -> ( Page, Cmd PageMsg )
-initSearchPage id =
+initSearchPage : String -> Search.Id -> ( Page, Cmd PageMsg )
+initSearchPage mdrRoot id =
     let
         ( model, cmd ) =
-            Page.Search.init id
+            Page.Search.init mdrRoot id
     in
     ( Search model, Cmd.map SearchMsg cmd )
 
@@ -84,8 +85,20 @@ updatePage2 updateFn toPageMsg toPage msg model =
 ---- MAIN STUFF ---------------------------------------------------------------
 
 
-type alias Model =
+{-| As we read flags at init, the model can be either `Initialized` correctly or
+an `InitError`.
+-}
+type Model
+    = Initialized InitializedModel
+    | InitError Decode.Error
+
+
+{-| The correctly initialized model contains top-level configuration values and
+the currently active page.
+-}
+type alias InitializedModel =
     { navKey : Nav.Key
+    , mdrRoot : String
     , page : Page
     }
 
@@ -94,9 +107,29 @@ type alias Model =
 ---- INIT ---------------------------------------------------------------------
 
 
+type alias Flags =
+    { mdrRoot : String }
+
+
 init : Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flagsValue url navKey =
-    routeTo url { navKey = navKey, page = NotFound }
+    case Decode.decodeValue flagsDecoder flagsValue of
+        Ok flags ->
+            routeTo url
+                { navKey = navKey
+                , mdrRoot = flags.mdrRoot
+                , page = NotFound
+                }
+                |> Tuple.mapFirst Initialized
+
+        Err error ->
+            ( InitError error, Cmd.none )
+
+
+flagsDecoder : Decoder Flags
+flagsDecoder =
+    Decode.succeed Flags
+        |> required "mdrRoot" Decode.string
 
 
 
@@ -113,6 +146,17 @@ type Msg
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
+    case model of
+        Initialized initializedModel ->
+            updateInitialized msg initializedModel
+                |> Tuple.mapFirst Initialized
+
+        InitError _ ->
+            ( model, Cmd.none )
+
+
+updateInitialized : Msg -> InitializedModel -> ( InitializedModel, Cmd Msg )
+updateInitialized msg model =
     case msg of
         ClickedLink urlRequest ->
             case urlRequest of
@@ -141,7 +185,7 @@ update msg model =
                     ( model, Cmd.none )
 
 
-routeTo : Url -> Model -> ( Model, Cmd Msg )
+routeTo : Url -> InitializedModel -> ( InitializedModel, Cmd Msg )
 routeTo url model =
     case Route.fromUrl url of
         Ok route ->
@@ -151,21 +195,21 @@ routeTo url model =
                         |> pageUpdate model
 
                 Route.Search id ->
-                    initSearchPage id
+                    initSearchPage model.mdrRoot id
                         |> pageUpdate model
 
         Err _ ->
             ( model, Cmd.none )
 
 
-pageUpdate : Model -> ( Page, Cmd PageMsg ) -> ( Model, Cmd Msg )
+pageUpdate : InitializedModel -> ( Page, Cmd PageMsg ) -> ( InitializedModel, Cmd Msg )
 pageUpdate model ( page, cmd ) =
     ( { model | page = page }
     , Cmd.map PageMsg cmd
     )
 
 
-receive : Ports.InMsg -> Model -> ( Model, Cmd Msg )
+receive : Ports.InMsg -> InitializedModel -> ( InitializedModel, Cmd Msg )
 receive msg model =
     case ( msg, model.page ) of
         _ ->
@@ -183,6 +227,18 @@ loginUri =
 
 view : Model -> Document Msg
 view model =
+    case model of
+        Initialized initializedModel ->
+            viewInitialized initializedModel
+
+        InitError error ->
+            { title = "Initialization Error"
+            , body = [ Html.text "We are sorry. The application isn't initialized correctly. Please try later." ]
+            }
+
+
+viewInitialized : InitializedModel -> Document Msg
+viewInitialized model =
     case model.page of
         NotFound ->
             { title = "Not Found"
@@ -215,13 +271,18 @@ loginButton =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions { page } =
-    case page of
-        Search pageModel ->
-            Page.Search.subscriptions pageModel
-                |> Sub.map (SearchMsg >> PageMsg)
+subscriptions model =
+    case model of
+        Initialized { page } ->
+            case page of
+                Search pageModel ->
+                    Page.Search.subscriptions pageModel
+                        |> Sub.map (SearchMsg >> PageMsg)
 
-        _ ->
+                _ ->
+                    Sub.none
+
+        InitError _ ->
             Sub.none
 
 

@@ -1,7 +1,6 @@
 module Request.Mdr exposing
     ( dataElement
     , dataElementGroupMembers
-    , mdrRoot
     , namespaceMembers
     )
 
@@ -16,13 +15,8 @@ import Task exposing (Task)
 import Url.Builder as Builder
 
 
-mdrRoot : String
-mdrRoot =
-    "https://mdr.germanbiobanknode.de/v3/api/mdr"
-
-
-namespaceMembers : String -> Task Error (List DataElementGroup)
-namespaceMembers name =
+namespaceMembers : String -> String -> Task Error (List DataElementGroup)
+namespaceMembers mdrRoot name =
     Builder.crossOrigin mdrRoot [ "namespaces", name, "members" ] []
         |> HttpBuilder.get
         |> HttpBuilder.withExpectJson (resultsDecoder (Decode.list DataElementGroup.decoder))
@@ -30,8 +24,8 @@ namespaceMembers name =
         |> Task.onError convertError
 
 
-dataElementGroupMembers : Urn -> Task Error (List DataElement)
-dataElementGroupMembers urn =
+dataElementGroupMembers : String -> Urn -> Task Error (List DataElement)
+dataElementGroupMembers mdrRoot urn =
     Builder.crossOrigin mdrRoot [ "dataelementgroups", urn, "members" ] []
         |> HttpBuilder.get
         |> HttpBuilder.withExpectJson (resultsDecoder (Decode.list DataElement.decoder))
@@ -39,8 +33,8 @@ dataElementGroupMembers urn =
         |> Task.onError convertError
 
 
-dataElement : Urn -> Task Error DataElementDetail
-dataElement urn =
+dataElement : String -> Urn -> Task Error DataElementDetail
+dataElement mdrRoot urn =
     Builder.crossOrigin mdrRoot [ "dataelements", urn ] []
         |> HttpBuilder.get
         |> HttpBuilder.withExpectJson DataElement.detailDecoder

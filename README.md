@@ -26,6 +26,13 @@ docker-compose up
 
 Point your browser to: [http://localhost:8080](http://localhost:8080).
 
+## Environment
+
+The Docker container needs certain environment variables to be able to run:
+
+* SERVICE_URI = the base URI of the search store
+* MDR_ROOT = the base URI of the Samply MDR to use
+
 ## Build
 
 The build is Docker based. Just run:
@@ -38,6 +45,7 @@ docker build .
 
 * install [npm][2]
 * run `npm install` to install the required node packages
+* run the search store on port 8080: `docker run -p 8080:8080 -e PORT="8080" -e DATABASE_URI="datomic:mem://store" akiel/samply.broker.search.store:latest`
 * run `npm run-script dev` to run an interactive development environment with hot reloading
 * open [http://localhost:3000](http://localhost:3000) in your browser
 
