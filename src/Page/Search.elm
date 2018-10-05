@@ -2,7 +2,7 @@ module Page.Search exposing
     ( Config
     , Model
     , init
-    , Msg(..)
+    , Msg
     , update
     , view
     , subscriptions
@@ -36,7 +36,7 @@ module Page.Search exposing
 -}
 
 import Browser exposing (Document)
-import Data.Command as Command exposing (commandBuilder, jsonCommand)
+import Data.Command as Command exposing (SyncToken, commandBuilder, jsonCommand)
 import Data.Interval as Interval
 import Data.LoadingStatus as LoadingStatus exposing (LoadingStatus(..))
 import Data.Mdr.DataElement as DataElement exposing (DataElement, DataElementDetail)
@@ -59,7 +59,7 @@ import Material.TopAppBar as TopAppBar
 import Page.Search.AddGroupCriterionDialog as AddGroupCriterionDialog
 import Page.Search.EditCriterionDialog as EditCriterionDialog
 import Process
-import Request.Command exposing (CommandResult)
+import Request.Command
 import Request.Error as Request
 import Request.Mdr
 import Request.Search
@@ -172,11 +172,18 @@ type alias Config =
     }
 
 
-init : Config -> Id -> ( Model, Cmd Msg )
-init { mdrRoot, mdrNamespace } id =
+{-| Initializes the model with config, an optional sync token and the searches
+identifier.
+
+    Tasks are spawn to load the search and metadata. Search loads are
+    synchronized if the optional sync token is present.
+
+-}
+init : Config -> Maybe SyncToken -> Id -> ( Model, Cmd Msg )
+init { mdrRoot, mdrNamespace } searchStoreSyncToken id =
     ( NormalLoading <| Start mdrRoot
     , Cmd.batch
-        [ Request.Search.search id
+        [ Request.Search.search searchStoreSyncToken id
             |> Task.attempt (SearchResult >> StartMsg)
         , loadNamespaceMembers mdrRoot mdrNamespace
         , Task.perform (\_ -> PassedSlowLoadThreshold) LoadingStatus.slowThreshold
@@ -213,14 +220,14 @@ type LoadedMsg
     | CloseAddGroupCriterionDialog
     | AddGroupCriterionDialogMsg Urn AddGroupCriterionDialog.Msg
     | AddGroupCriterion DataElementDetail Criterion
-    | CriterionAdded DataElementDetail Criterion (Result Request.Error CommandResult)
+    | CriterionAdded DataElementDetail Criterion (Result Request.Error Command.Result)
     | OpenCriterionDialog Urn
     | CloseCriterionDialog Urn
     | CriterionDialogMsg Urn EditCriterionDialog.Msg
     | SaveCriterion Criterion
-    | CriterionSaved Criterion (Result Request.Error CommandResult)
+    | CriterionSaved Criterion (Result Request.Error Command.Result)
     | RemoveCriterion Urn
-    | CriterionRemoved Urn (Result Request.Error CommandResult)
+    | CriterionRemoved Urn (Result Request.Error Command.Result)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -781,15 +788,17 @@ updateCriterion mdrKey f model =
     { model | search = updateSearch model.search }
 
 
-addCriterionTask : Id -> Criterion -> Task Request.Error CommandResult
+addCriterionTask : Id -> Criterion -> Task Request.Error Command.Result
 addCriterionTask id criterion =
-    jsonCommand "search" "add-criterion" (Criterion.encodeWithSearchId id criterion)
+    jsonCommand (Command.Name "search" "add-criterion")
+        (Criterion.encodeWithSearchId id criterion)
         |> Request.Command.perform
 
 
-editCriterionTask : Id -> Criterion -> Task Request.Error CommandResult
+editCriterionTask : Id -> Criterion -> Task Request.Error Command.Result
 editCriterionTask id criterion =
-    jsonCommand "search" "edit-criterion" (Criterion.encodeWithSearchId id criterion)
+    jsonCommand (Command.Name "search" "edit-criterion")
+        (Criterion.encodeWithSearchId id criterion)
         |> Request.Command.perform
 
 
@@ -812,9 +821,9 @@ addCriterion elementDetail criterion model =
     { model | search = updateSearch model.search }
 
 
-removeCriterionTask : Id -> Urn -> Task Request.Error CommandResult
+removeCriterionTask : Id -> Urn -> Task Request.Error Command.Result
 removeCriterionTask id elementId =
-    commandBuilder "search" "remove-criterion"
+    commandBuilder (Command.Name "search" "remove-criterion")
         |> Command.addStringParam "search-id" id
         |> Command.addStringParam "data-element-id" elementId
         |> Command.build

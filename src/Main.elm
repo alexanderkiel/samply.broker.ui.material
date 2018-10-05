@@ -2,6 +2,7 @@ module Main exposing (main)
 
 import Browser exposing (Document, UrlRequest(..))
 import Browser.Navigation as Nav
+import Data.Command exposing (SyncToken)
 import Data.Search as Search
 import Html exposing (Html)
 import Html.Attributes exposing (class, href)
@@ -42,11 +43,19 @@ initHomePage routeKey =
 
 
 initSearchPage : InitializedModel -> Search.Id -> ( Page, Cmd PageMsg )
-initSearchPage { mdrRoot, mdrNamespace } id =
-    Page.Search.init { mdrRoot = mdrRoot, mdrNamespace = mdrNamespace } id
+initSearchPage { mdrRoot, mdrNamespace, searchStoreSyncToken } id =
+    Page.Search.init { mdrRoot = mdrRoot, mdrNamespace = mdrNamespace }
+        searchStoreSyncToken
+        id
         |> Tuple.mapBoth Search (Cmd.map SearchMsg)
 
 
+{-| Updates the model of a single page.
+
+    Only messages matching the page type are considered. Messages from other
+    pages are just ignored.
+
+-}
 updatePage : PageMsg -> Page -> ( Page, Cmd PageMsg )
 updatePage msg model =
     case ( msg, model ) of
@@ -60,6 +69,7 @@ updatePage msg model =
 
         _ ->
             ( model, Cmd.none )
+
 
 
 ---- MAIN STUFF ---------------------------------------------------------------
@@ -81,6 +91,7 @@ type alias InitializedModel =
     , mdrRoot : String
     , mdrNamespace : String
     , page : Page
+    , searchStoreSyncToken : Maybe SyncToken
     }
 
 
@@ -103,6 +114,7 @@ init flagsValue url navKey =
                 , mdrRoot = flags.mdrRoot
                 , mdrNamespace = flags.mdrNamespace
                 , page = NotFound
+                , searchStoreSyncToken = Nothing
                 }
                 |> Tuple.mapFirst Initialized
 
@@ -158,8 +170,9 @@ updateInitialized msg model =
             ( model, Nav.load loginUri )
 
         PageMsg pageMsg ->
-            updatePage pageMsg model.page
-                |> pageUpdate model
+            model
+                |> updateSearchStoreSyncToken pageMsg
+                |> pageUpdate (updatePage pageMsg model.page)
 
         Receive result ->
             case result of
@@ -170,25 +183,44 @@ updateInitialized msg model =
                     ( model, Cmd.none )
 
 
+updateSearchStoreSyncToken : PageMsg -> InitializedModel -> InitializedModel
+updateSearchStoreSyncToken pageMsg model =
+    let
+        maybeSyncToken =
+            case pageMsg of
+                HomeMsg homeMsg ->
+                    Page.Home.getSearchStoreSyncToken homeMsg
+
+                _ ->
+                    Nothing
+    in
+    case maybeSyncToken of
+        Just syncToken ->
+            { model | searchStoreSyncToken = Just syncToken }
+
+        Nothing ->
+            model
+
+
 routeTo : Url -> InitializedModel -> ( InitializedModel, Cmd Msg )
 routeTo url model =
     case Route.fromUrl url of
         Ok route ->
             case route of
                 Route.Home ->
-                    initHomePage (Route.Key model.navKey)
-                        |> pageUpdate model
+                    model
+                        |> pageUpdate (initHomePage (Route.Key model.navKey))
 
                 Route.Search id ->
-                    initSearchPage model id
-                        |> pageUpdate model
+                    model
+                        |> pageUpdate (initSearchPage model id)
 
         Err _ ->
             ( model, Cmd.none )
 
 
-pageUpdate : InitializedModel -> ( Page, Cmd PageMsg ) -> ( InitializedModel, Cmd Msg )
-pageUpdate model ( page, cmd ) =
+pageUpdate : ( Page, Cmd PageMsg ) -> InitializedModel -> ( InitializedModel, Cmd Msg )
+pageUpdate ( page, cmd ) model =
     ( { model | page = page }
     , Cmd.map PageMsg cmd
     )

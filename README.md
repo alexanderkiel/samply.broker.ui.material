@@ -50,6 +50,14 @@ docker build .
 * run `npm run-script dev` to run an interactive development environment with hot reloading
 * open [http://localhost:3000](http://localhost:3000) in your browser
 
+## Search Store API
+
+The search store API is modeled after the [CQRS][6] pattern. There is one 
+command endpoint, accepting all the writes and several REST-like query endpoints
+for the reads.
+
+Command results only contain a sync token and an optional identifier. After issuing a command, the sync token is used to sync with the read side, so that we can be sure to see our own effects. One example is the `search/create` command which creates a new search. After creating the search, the UI navigates to the search page which displays it. The result of the `search/create` command is the search identifier and a sync token which is used in the subsequent read request of the search created. 
+
 ## License
 
 Copyright © 2018 Alexander Kiel
@@ -62,3 +70,4 @@ your option) any later version.
 [3]: <https://webpack.js.org>
 [4]: <https://en.wikipedia.org/wiki/Single-page_application>
 [5]: <https://elm-lang.org>
+[6]: <https://docs.microsoft.com/en-us/azure/architecture/patterns/cqrs>

@@ -1,7 +1,5 @@
 module Request.Command exposing
-    ( CommandResult
-    , CreateCommandResult
-    , perform
+    ( perform
     , performCreate
     )
 
@@ -16,38 +14,11 @@ import Task exposing (Task)
 import Url.Builder as Builder
 
 
-{-| The result of a command which does an arbitrary side effect.
-
-    See `CreateCommandResult` for the result of a command which created an
-    entity.
-
-    The `t` value can be used to fetch at least a state which includes the
-    effects of this command.
-
--}
-type alias CommandResult =
-    { t : Int }
-
-
-{-| The result of a command which created an entity.
-
-    The `t` value can be used to fetch at least a state which includes the
-    effects of this command.
-
-    The `id` is the identifier of the entity created.
-
--}
-type alias CreateCommandResult =
-    { t : Int
-    , id : String
-    }
-
-
 {-| Performs (executes) the command.
 -}
-perform : Command -> Task Error CommandResult
+perform : Command -> Task Error Command.Result
 perform command =
-    url command
+    url command.name
         |> HttpBuilder.post
         |> HttpBuilder.withJsonBody command.params
         |> HttpBuilder.withExpectJson commandResultDecoder
@@ -58,9 +29,9 @@ perform command =
 {-| Performs (executes) the command returning a result including the identifier
 of the entity created.
 -}
-performCreate : Command -> Task Error CreateCommandResult
+performCreate : Command -> Task Error Command.CreateResult
 performCreate command =
-    url command
+    url command.name
         |> HttpBuilder.post
         |> HttpBuilder.withJsonBody command.params
         |> HttpBuilder.withExpectJson createCommandResultDecoder
@@ -68,19 +39,19 @@ performCreate command =
         |> Task.onError convertError
 
 
-url : Command -> String
-url { namespace, name } =
+url : Command.Name -> String
+url (Command.Name namespace name) =
     Builder.absolute [ "api", "command", namespace, name ] []
 
 
-commandResultDecoder : Decoder CommandResult
+commandResultDecoder : Decoder Command.Result
 commandResultDecoder =
-    Decode.succeed CommandResult
-        |> required "t" Decode.int
+    Decode.succeed Command.Result
+        |> required "t" Command.syncTokenDecoder
 
 
-createCommandResultDecoder : Decoder CreateCommandResult
+createCommandResultDecoder : Decoder Command.CreateResult
 createCommandResultDecoder =
-    Decode.succeed CreateCommandResult
-        |> required "t" Decode.int
+    Decode.succeed Command.CreateResult
+        |> required "t" Command.syncTokenDecoder
         |> required "id" Decode.string

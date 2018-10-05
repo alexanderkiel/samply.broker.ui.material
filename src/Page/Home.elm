@@ -1,17 +1,37 @@
 module Page.Home exposing
     ( Model
-    , Msg(..)
-    , appBar
     , init
-    , startNewSearchButton
+    , Msg
     , update
+    , getSearchStoreSyncToken
     , view
-    , welcomePanel
     )
+
+{-| The home page displays a button creating new searches.
+
+
+# Model
+
+@docs Model
+@docs init
+
+
+# Update
+
+@docs Msg
+@docs update
+@docs getSearchStoreSyncToken
+
+
+# View
+
+@docs view
+
+-}
 
 import Browser exposing (Document)
 import Browser.Navigation as Nav
-import Data.Command exposing (emptyCommand)
+import Data.Command as Command exposing (SyncToken, emptyCommand)
 import Data.Search as Search
 import Html exposing (Html)
 import Html.Attributes as Attr
@@ -19,7 +39,7 @@ import Material.Button as Button
 import Material.Options as Options
 import Material.TopAppBar as TopAppBar
 import Ports
-import Request.Command exposing (CreateCommandResult)
+import Request.Command
 import Request.Error as Request
 import Route
 import Task
@@ -37,7 +57,9 @@ type alias Model =
 
 init : Route.Key -> ( Model, Cmd Msg )
 init routeKey =
-    ( { routeKey = routeKey, searchStarted = False }
+    ( { routeKey = routeKey
+      , searchStarted = False
+      }
     , Cmd.none
     )
 
@@ -48,7 +70,7 @@ init routeKey =
 
 type Msg
     = StartNewSearch
-    | SearchCreated (Result Request.Error CreateCommandResult)
+    | SearchCreated (Result Request.Error Command.CreateResult)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -56,7 +78,7 @@ update msg model =
     case msg of
         StartNewSearch ->
             ( { model | searchStarted = True }
-            , emptyCommand "search" "create"
+            , emptyCommand (Command.Name "search" "create")
                 |> Request.Command.performCreate
                 |> Task.attempt SearchCreated
             )
@@ -68,6 +90,22 @@ update msg model =
 
                 Err _ ->
                     ( model, Cmd.none )
+
+
+{-| Extracts optional sync tokens from the home pages messages.
+
+    The home page causes effects in the search store. Messages returned by such
+    effects carry sync tokens. Such sync tokens are important for other pages.
+
+-}
+getSearchStoreSyncToken : Msg -> Maybe SyncToken
+getSearchStoreSyncToken msg =
+    case msg of
+        SearchCreated (Ok { t }) ->
+            Just t
+
+        _ ->
+            Nothing
 
 
 
