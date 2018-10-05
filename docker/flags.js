@@ -1,3 +1,4 @@
 flags = {
-    mdrRoot: '<mdr-root>'
+    mdrRoot: '<mdr-root>',
+    mdrNamespace: '<mdr-namespace>'
 };

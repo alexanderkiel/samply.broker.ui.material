@@ -1,4 +1,39 @@
-module Page.Search exposing (Model, Msg(..), init, subscriptions, update, view)
+module Page.Search exposing
+    ( Config
+    , Model
+    , init
+    , Msg(..)
+    , update
+    , view
+    , subscriptions
+    )
+
+{-| The search page displays a single search which can be edited.
+
+
+# Model
+
+@docs Config
+@docs Model
+@docs init
+
+
+# Update
+
+@docs Msg
+@docs update
+
+
+# View
+
+@docs view
+
+
+# Subscriptions
+
+@docs subscriptions
+
+-}
 
 import Browser exposing (Document)
 import Data.Command as Command exposing (commandBuilder, jsonCommand)
@@ -131,13 +166,19 @@ initCriterionDetail elementDetail query =
     }
 
 
-init : String -> Id -> ( Model, Cmd Msg )
-init mdrRoot id =
+type alias Config =
+    { mdrRoot : String
+    , mdrNamespace : String
+    }
+
+
+init : Config -> Id -> ( Model, Cmd Msg )
+init { mdrRoot, mdrNamespace } id =
     ( NormalLoading <| Start mdrRoot
     , Cmd.batch
         [ Request.Search.search id
             |> Task.attempt (SearchResult >> StartMsg)
-        , loadNamespaceMembers mdrRoot "mdr16"
+        , loadNamespaceMembers mdrRoot mdrNamespace
         , Task.perform (\_ -> PassedSlowLoadThreshold) LoadingStatus.slowThreshold
         ]
     )
@@ -291,27 +332,9 @@ update msg model =
                     )
 
 
-dataElementIdWhiteList =
-    [ "urn:mdr16:dataelement:23:1"
-    , "urn:mdr16:dataelement:14:1"
-    , "urn:mdr16:dataelement:15:1"
-    , "urn:mdr16:dataelement:16:1"
-    , "urn:mdr16:dataelement:17:1"
-    , "urn:mdr16:dataelement:18:1"
-    , "urn:mdr16:dataelement:27:1"
-    , "urn:mdr16:dataelement:28:1"
-    , "urn:mdr16:dataelement:29:1"
-    , "urn:mdr16:dataelement:30:1"
-    , "urn:mdr16:dataelement:31:1"
-    , "urn:mdr16:dataelement:32:1"
-    , "urn:mdr16:dataelement:33:1"
-    , "urn:mdr16:dataelement:34:1"
-    ]
-
-
 isDataElementRelevant : DataElement -> Bool
-isDataElementRelevant { id } =
-    List.member id dataElementIdWhiteList
+isDataElementRelevant { designation } =
+    String.contains "ID" designation |> not
 
 
 markAsSlowLoading loadingModel =
@@ -814,17 +837,9 @@ removeCriterion elementId model =
     { model | search = updateSearch model.search }
 
 
-relevantGroupIds : List Urn
-relevantGroupIds =
-    [ "urn:mdr16:dataelementgroup:5:1"
-    , "urn:mdr16:dataelementgroup:6:1"
-    , "urn:mdr16:dataelementgroup:3:1"
-    ]
-
-
 relevantGroup : DataElementGroup -> Bool
 relevantGroup { id } =
-    List.member id relevantGroupIds
+    True
 
 
 loadDataElementGroupMembers : String -> Urn -> Cmd Msg
@@ -969,25 +984,8 @@ criterionList : List CriterionModel -> Dict Urn Group -> Html LoadedMsg
 criterionList criteria groups =
     groups
         |> Dict.values
-        |> List.sortBy groupOrder
         |> List.map (renderGroup criteria)
         |> LayoutGrid.view []
-
-
-groupOrder : Group -> Int
-groupOrder { group } =
-    case group.id of
-        "urn:mdr16:dataelementgroup:5:1" ->
-            1
-
-        "urn:mdr16:dataelementgroup:6:1" ->
-            2
-
-        "urn:mdr16:dataelementgroup:3:1" ->
-            3
-
-        _ ->
-            4
 
 
 {-| Renders a data element group like Donor or Sample.

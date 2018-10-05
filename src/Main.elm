@@ -37,49 +37,29 @@ type PageMsg
 
 initHomePage : Route.Key -> ( Page, Cmd PageMsg )
 initHomePage routeKey =
-    let
-        ( model, cmd ) =
-            Page.Home.init routeKey
-    in
-    ( Home model, Cmd.map HomeMsg cmd )
+    Page.Home.init routeKey
+        |> Tuple.mapBoth Home (Cmd.map HomeMsg)
 
 
-initSearchPage : String -> Search.Id -> ( Page, Cmd PageMsg )
-initSearchPage mdrRoot id =
-    let
-        ( model, cmd ) =
-            Page.Search.init mdrRoot id
-    in
-    ( Search model, Cmd.map SearchMsg cmd )
+initSearchPage : InitializedModel -> Search.Id -> ( Page, Cmd PageMsg )
+initSearchPage { mdrRoot, mdrNamespace } id =
+    Page.Search.init { mdrRoot = mdrRoot, mdrNamespace = mdrNamespace } id
+        |> Tuple.mapBoth Search (Cmd.map SearchMsg)
 
 
 updatePage : PageMsg -> Page -> ( Page, Cmd PageMsg )
 updatePage msg model =
     case ( msg, model ) of
         ( HomeMsg homeMsg, Home homeModel ) ->
-            updatePage2 Page.Home.update HomeMsg Home homeMsg homeModel
+            Page.Home.update homeMsg homeModel
+                |> Tuple.mapBoth Home (Cmd.map HomeMsg)
 
         ( SearchMsg searchMsg, Search searchModel ) ->
-            updatePage2 Page.Search.update SearchMsg Search searchMsg searchModel
+            Page.Search.update searchMsg searchModel
+                |> Tuple.mapBoth Search (Cmd.map SearchMsg)
 
         _ ->
             ( model, Cmd.none )
-
-
-updatePage2 :
-    (msg -> model -> ( model, Cmd msg ))
-    -> (msg -> PageMsg)
-    -> (model -> Page)
-    -> msg
-    -> model
-    -> ( Page, Cmd PageMsg )
-updatePage2 updateFn toPageMsg toPage msg model =
-    let
-        ( newModel, cmd ) =
-            updateFn msg model
-    in
-    ( toPage newModel, Cmd.map toPageMsg cmd )
-
 
 
 ---- MAIN STUFF ---------------------------------------------------------------
@@ -99,6 +79,7 @@ the currently active page.
 type alias InitializedModel =
     { navKey : Nav.Key
     , mdrRoot : String
+    , mdrNamespace : String
     , page : Page
     }
 
@@ -108,7 +89,9 @@ type alias InitializedModel =
 
 
 type alias Flags =
-    { mdrRoot : String }
+    { mdrRoot : String
+    , mdrNamespace : String
+    }
 
 
 init : Value -> Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -118,6 +101,7 @@ init flagsValue url navKey =
             routeTo url
                 { navKey = navKey
                 , mdrRoot = flags.mdrRoot
+                , mdrNamespace = flags.mdrNamespace
                 , page = NotFound
                 }
                 |> Tuple.mapFirst Initialized
@@ -130,6 +114,7 @@ flagsDecoder : Decoder Flags
 flagsDecoder =
     Decode.succeed Flags
         |> required "mdrRoot" Decode.string
+        |> required "mdrNamespace" Decode.string
 
 
 
@@ -195,7 +180,7 @@ routeTo url model =
                         |> pageUpdate model
 
                 Route.Search id ->
-                    initSearchPage model.mdrRoot id
+                    initSearchPage model id
                         |> pageUpdate model
 
         Err _ ->

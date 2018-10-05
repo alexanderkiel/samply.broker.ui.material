@@ -30,8 +30,9 @@ Point your browser to: [http://localhost:8080](http://localhost:8080).
 
 The Docker container needs certain environment variables to be able to run:
 
-* SERVICE_URI = the base URI of the search store
-* MDR_ROOT = the base URI of the Samply MDR to use
+* SERVICE_URI - the base URI of the search store
+* MDR_ROOT - the base URI of the Samply MDR to use
+* MDR_NAMESPACE - the namespace of the MDR to use
 
 ## Build
 
