@@ -39,7 +39,6 @@ import Html.Attributes as Attr
 import Material.Button as Button
 import Material.Options as Options
 import Material.TopAppBar as TopAppBar
-import Ports
 import Request.Command
 import Request.Error as Request
 import Route

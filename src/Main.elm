@@ -16,7 +16,6 @@ import Material.Options as Options
 import Material.TopAppBar as TopAppBar
 import Page.Home
 import Page.Search
-import Ports
 import Route
 import Url exposing (Url)
 
@@ -138,7 +137,6 @@ type Msg
     | ChangedUrl Url
     | Login
     | PageMsg PageMsg
-    | Receive (Result Decode.Error Ports.InMsg)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -173,14 +171,6 @@ updateInitialized msg model =
             model
                 |> updateSearchStoreSyncToken pageMsg
                 |> pageUpdate (updatePage pageMsg model.page)
-
-        Receive result ->
-            case result of
-                Ok inMsg ->
-                    receive inMsg model
-
-                Err _ ->
-                    ( model, Cmd.none )
 
 
 updateSearchStoreSyncToken : PageMsg -> InitializedModel -> InitializedModel
@@ -224,13 +214,6 @@ pageUpdate ( page, cmd ) model =
     ( { model | page = page }
     , Cmd.map PageMsg cmd
     )
-
-
-receive : Ports.InMsg -> InitializedModel -> ( InitializedModel, Cmd Msg )
-receive msg model =
-    case ( msg, model.page ) of
-        _ ->
-            ( model, Cmd.none )
 
 
 loginUri : String
