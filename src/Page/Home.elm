@@ -32,6 +32,7 @@ module Page.Home exposing
 import Browser exposing (Document)
 import Browser.Navigation as Nav
 import Data.Command as Command exposing (SyncToken, emptyCommand)
+import Data.Name exposing (Name(..))
 import Data.Search as Search
 import Html exposing (Html)
 import Html.Attributes as Attr
@@ -78,7 +79,7 @@ update msg model =
     case msg of
         StartNewSearch ->
             ( { model | searchStarted = True }
-            , emptyCommand (Command.Name "search" "create")
+            , emptyCommand (Name "search" "create")
                 |> Request.Command.performCreate
                 |> Task.attempt SearchCreated
             )

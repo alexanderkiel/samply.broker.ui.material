@@ -4,6 +4,7 @@ module Request.Command exposing
     )
 
 import Data.Command as Command exposing (Command)
+import Data.Name exposing (Name(..))
 import Dict exposing (Dict)
 import HttpBuilder
 import Json.Decode as Decode exposing (Decoder)
@@ -39,8 +40,8 @@ performCreate command =
         |> Task.onError convertError
 
 
-url : Command.Name -> String
-url (Command.Name namespace name) =
+url : Name -> String
+url (Name namespace name) =
     Builder.absolute [ "api", "command", namespace, name ] []
 
 

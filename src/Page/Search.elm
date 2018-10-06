@@ -41,6 +41,7 @@ import Data.Interval as Interval
 import Data.LoadingStatus as LoadingStatus exposing (LoadingStatus(..))
 import Data.Mdr.DataElement as DataElement exposing (DataElement, DataElementDetail)
 import Data.Mdr.DataElementGroup exposing (DataElementGroup)
+import Data.Name exposing (Name(..))
 import Data.Search exposing (Id, Search)
 import Data.Search.Criterion as Criterion exposing (Criterion)
 import Data.Urn exposing (Urn)
@@ -790,14 +791,14 @@ updateCriterion mdrKey f model =
 
 addCriterionTask : Id -> Criterion -> Task Request.Error Command.Result
 addCriterionTask id criterion =
-    jsonCommand (Command.Name "search" "add-criterion")
+    jsonCommand (Name "search" "add-criterion")
         (Criterion.encodeWithSearchId id criterion)
         |> Request.Command.perform
 
 
 editCriterionTask : Id -> Criterion -> Task Request.Error Command.Result
 editCriterionTask id criterion =
-    jsonCommand (Command.Name "search" "edit-criterion")
+    jsonCommand (Name "search" "edit-criterion")
         (Criterion.encodeWithSearchId id criterion)
         |> Request.Command.perform
 
@@ -823,7 +824,7 @@ addCriterion elementDetail criterion model =
 
 removeCriterionTask : Id -> Urn -> Task Request.Error Command.Result
 removeCriterionTask id elementId =
-    commandBuilder (Command.Name "search" "remove-criterion")
+    commandBuilder (Name "search" "remove-criterion")
         |> Command.addStringParam "search-id" id
         |> Command.addStringParam "data-element-id" elementId
         |> Command.build

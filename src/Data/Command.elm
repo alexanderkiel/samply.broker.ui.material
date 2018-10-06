@@ -1,6 +1,5 @@
 module Data.Command exposing
     ( Command
-    , Name(..)
     , SyncToken
     , Result
     , CreateResult
@@ -19,7 +18,6 @@ module Data.Command exposing
 # Types
 
 @docs Command
-@docs Name
 @docs SyncToken
 @docs Result
 @docs CreateResult
@@ -46,6 +44,7 @@ module Data.Command exposing
 
 -}
 
+import Data.Name exposing (Name)
 import Dict exposing (Dict)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode
@@ -60,12 +59,6 @@ type alias Command =
     { name : Name
     , params : Encode.Value
     }
-
-
-{-| A namespaced command name.
--}
-type Name
-    = Name String String
 
 
 {-| A token to sync the reads with the effects of a command.
