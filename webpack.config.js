@@ -70,6 +70,11 @@ const devServer = {
         "/api": {
             target: "http://localhost:8080",
             pathRewrite: {"^/api": ""}
+        },
+        "/api/event-stream": {
+            target: "ws://localhost:8080",
+            ws: true,
+            pathRewrite: {"^/api": ""}
         }
     }
 };

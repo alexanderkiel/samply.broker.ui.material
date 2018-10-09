@@ -1,8 +1,18 @@
-module Data.Name exposing (Name(..))
+module Data.Name exposing (Name(..), name, namespace)
 
-{-| A namespaced command name.
+{-| A namespaced name.
 -}
 
 
 type Name
     = Name String String
+
+
+namespace : Name -> String
+namespace (Name x _) =
+    x
+
+
+name : Name -> String
+name (Name _ x) =
+    x
