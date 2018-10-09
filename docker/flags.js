@@ -1,4 +1,5 @@
 flags = {
     mdrRoot: '<mdr-root>',
-    mdrNamespace: '<mdr-namespace>'
+    mdrNamespace: '<mdr-namespace>',
+    host: window.location.host
 };

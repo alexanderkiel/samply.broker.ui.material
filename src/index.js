@@ -1,7 +1,10 @@
 'use strict';
 
 require('./main.scss');
+let WebSocketClient = require('./WebSocketClient.js');
 
 let elm = require('./Main.elm');
 
-elm.Elm.Main.init({flags: flags});
+let app = elm.Elm.Main.init({flags: flags});
+
+WebSocketClient.subscribe(app);

@@ -19,10 +19,12 @@
             "elm/time": "1.0.0",
             "elm/url": "1.0.0",
             "justinmimbs/date": "3.1.1",
-            "lukewestby/elm-http-builder": "6.0.0"
+            "lukewestby/elm-http-builder": "6.0.0",
+            "billstclair/elm-websocket-client": "2.0.2"
         },
         "indirect": {
-            "elm/virtual-dom": "1.0.0"
+            "elm/virtual-dom": "1.0.0",
+            "elm-community/list-extra": "8.0.0"
         }
     },
     "test-dependencies": {

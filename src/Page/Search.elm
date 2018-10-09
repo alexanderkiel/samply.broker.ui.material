@@ -6,6 +6,7 @@ module Page.Search exposing
     , update
     , view
     , subscriptions
+    , eventSubscriptions
     )
 
 {-| The search page displays a single search which can be edited.
@@ -32,11 +33,13 @@ module Page.Search exposing
 # Subscriptions
 
 @docs subscriptions
+@docs eventSubscriptions
 
 -}
 
 import Browser exposing (Document)
 import Data.Command as Command exposing (SyncToken, commandBuilder, jsonCommand)
+import Data.Event exposing (Event)
 import Data.Interval as Interval
 import Data.LoadingStatus as LoadingStatus exposing (LoadingStatus(..))
 import Data.Mdr.DataElement as DataElement exposing (DataElement, DataElementDetail)
@@ -46,8 +49,11 @@ import Data.Search exposing (Id, Search)
 import Data.Search.Criterion as Criterion exposing (Criterion)
 import Data.Urn exposing (Urn)
 import Dict exposing (Dict)
+import EventSub exposing (EventSub)
 import Html exposing (Html)
 import Html.Attributes as Attr
+import Json.Decode as Decode exposing (decodeValue)
+import Json.Encode as Encode
 import Material.Button as Button
 import Material.Card as Card
 import Material.Dialog as Dialog
@@ -91,7 +97,7 @@ type LoadingModel
 type alias SearchModel =
     { id : Id
     , title : String
-    , criteria : List CriterionModel
+    , criteria : Dict String CriterionModel
     }
 
 
@@ -148,7 +154,11 @@ initSearchModel : Search -> SearchModel
 initSearchModel { id, title, criteria } =
     { id = id
     , title = title
-    , criteria = List.map initCriterionModel criteria
+    , criteria =
+        criteria
+            |> List.map initCriterionModel
+            |> List.map (\({ mdrKey } as model) -> ( mdrKey, model ))
+            |> Dict.fromList
     }
 
 
@@ -206,7 +216,6 @@ type Msg
     = StartMsg StartMsg
     | LoadedMsg LoadedMsg
     | PassedSlowLoadThreshold
-    | DataElementDetailLoaded Urn (Result Request.Error DataElementDetail)
     | DataElementGroupMembersLoaded Urn (Result Request.Error (List DataElement))
 
 
@@ -216,7 +225,8 @@ type StartMsg
 
 
 type LoadedMsg
-    = OpenAddCriterionDialog
+    = DataElementDetailLoaded Urn (Result Request.Error DataElementDetail)
+    | OpenAddCriterionDialog
     | OpenAddGroupCriterionDialog Urn
     | CloseAddGroupCriterionDialog
     | AddGroupCriterionDialogMsg Urn AddGroupCriterionDialog.Msg
@@ -229,6 +239,8 @@ type LoadedMsg
     | CriterionSaved Criterion (Result Request.Error Command.Result)
     | RemoveCriterion Urn
     | CriterionRemoved Urn (Result Request.Error Command.Result)
+    | CriterionAddedEvent Event
+    | CriterionEditedEvent Event
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -247,7 +259,14 @@ update msg model =
                             ( lift newLoadingModel, cmd )
 
                         FinishedLoading loadedModel ->
-                            ( Loaded loadedModel, cmd )
+                            ( Loaded loadedModel
+                            , loadedModel.search.criteria
+                                |> Dict.values
+                                |> List.map (.mdrKey >> loadElementDetail loadedModel.mdrRoot)
+                                |> List.map (Cmd.map LoadedMsg)
+                                |> (::) cmd
+                                |> Cmd.batch
+                            )
             in
             case model of
                 NormalLoading loadingModel ->
@@ -287,16 +306,6 @@ update msg model =
                     model
             , Cmd.none
             )
-
-        DataElementDetailLoaded elementId result ->
-            case result of
-                Ok element ->
-                    ( addElementDetail elementId element model, Cmd.none )
-
-                Err error ->
-                    ( model
-                    , Cmd.none
-                    )
 
         DataElementGroupMembersLoaded groupId result ->
             case result of
@@ -373,66 +382,20 @@ markGroupsAsSlowLoading =
 
 
 markSearchModelAsSlowLoading search =
-    { search
-        | criteria =
-            List.map markLoadingElementDetailAsSlowLoading search.criteria
-    }
+    let
+        updateCriteria f =
+            { search | criteria = f search.criteria }
+    in
+    updateCriteria <| Dict.map markLoadingElementDetailAsSlowLoading
 
 
-markLoadingElementDetailAsSlowLoading criterion =
+markLoadingElementDetailAsSlowLoading _ criterion =
     case criterion.loadingCriterionDetail of
         LoadingStatus.Loading ->
             { criterion | loadingCriterionDetail = LoadingStatus.LoadingSlowly }
 
         _ ->
             criterion
-
-
-addElementDetail : Urn -> DataElementDetail -> Model -> Model
-addElementDetail elementId elementDetail model =
-    let
-        criterionDetail query =
-            LoadingStatus.Loaded <| initCriterionDetail elementDetail query
-
-        setElementDetail ({ mdrKey, query } as criterion) =
-            if mdrKey == elementId then
-                { criterion | loadingCriterionDetail = criterionDetail query }
-
-            else
-                criterion
-
-        insertElementDetail search =
-            { search | criteria = List.map setElementDetail search.criteria }
-
-        updateSearch f loadedModel =
-            { loadedModel | search = f loadedModel.search }
-
-        updateLoadingModel lift loadingModel =
-            case loadingModel of
-                SearchLoaded mdrRoot search ->
-                    search
-                        |> insertElementDetail
-                        |> SearchLoaded mdrRoot
-                        |> lift
-
-                -- Ignore elements here, because we are at least in
-                -- SearchLoaded state before loading the details.
-                _ ->
-                    lift loadingModel
-    in
-    case model of
-        NormalLoading loadingModel ->
-            updateLoadingModel NormalLoading loadingModel
-
-        SlowLoading loadingModel ->
-            updateLoadingModel SlowLoading loadingModel
-
-        Loaded loadedModel ->
-            Loaded <| updateSearch insertElementDetail loadedModel
-
-        -- End state
-        Failed _ ->
-            model
 
 
 type UpdateAtStartResult
@@ -483,9 +446,7 @@ updateAtStart msg model loadingTag =
                             searchModel
                                 |> SearchLoaded mdrRoot
                                 |> StillLoading
-                    , search.criteria
-                        |> List.map (.mdrKey >> (loadElementDetail <| getMdrRoot model))
-                        |> Cmd.batch
+                    , Cmd.none
                     )
 
                 Err error ->
@@ -591,6 +552,14 @@ getMdrRoot model =
 updateAfterLoading : LoadedMsg -> LoadedModel -> ( LoadedModel, Cmd LoadedMsg )
 updateAfterLoading msg model =
     case msg of
+        DataElementDetailLoaded elementId result ->
+            case result of
+                Ok element ->
+                    ( addElementDetail elementId element model, Cmd.none )
+
+                Err _ ->
+                    ( model, Cmd.none )
+
         OpenAddCriterionDialog ->
             ( model
             , Cmd.none
@@ -635,6 +604,7 @@ updateAfterLoading msg model =
                     |> updateCriterionDialogModel
                     |> LoadingStatus.mapLoaded
                     |> updateLoadingCriterionDetail
+                    |> Maybe.map
                 )
                 model
             , Cmd.none
@@ -655,7 +625,10 @@ updateAfterLoading msg model =
         CriterionAdded elementDetail criterion result ->
             case result of
                 Ok _ ->
-                    ( (addCriterion elementDetail criterion >> closeDialog) model
+                    ( model
+                        |> addCriterion criterion
+                        |> updateCriterionElementDetail elementDetail
+                        |> closeDialog
                     , Cmd.none
                     )
 
@@ -685,6 +658,48 @@ updateAfterLoading msg model =
                 Err _ ->
                     ( model, Cmd.none )
 
+        CriterionAddedEvent event ->
+            case decodeValue Criterion.decoder event.data of
+                Ok criterion ->
+                    ( addCriterion criterion model
+                    , loadElementDetail model.mdrRoot criterion.mdrKey
+                    )
+
+                Err error ->
+                    ( model, Cmd.none )
+
+        CriterionEditedEvent event ->
+            case decodeValue Criterion.decoder event.data of
+                Ok criterion ->
+                    ( setCriterion criterion model
+                    , Cmd.none
+                    )
+
+                Err error ->
+                    ( model, Cmd.none )
+
+
+addElementDetail : Urn -> DataElementDetail -> LoadedModel -> LoadedModel
+addElementDetail elementId elementDetail model =
+    let
+        criterionDetail query =
+            LoadingStatus.Loaded <| initCriterionDetail elementDetail query
+
+        setElementDetail mdrKey ({ query } as criterion) =
+            if mdrKey == elementId then
+                { criterion | loadingCriterionDetail = criterionDetail query }
+
+            else
+                criterion
+
+        insertElementDetail search =
+            { search | criteria = Dict.map setElementDetail search.criteria }
+
+        updateSearch f loadedModel =
+            { loadedModel | search = f loadedModel.search }
+    in
+    updateSearch insertElementDetail model
+
 
 openDialog : DialogRef -> LoadedModel -> LoadedModel
 openDialog dialogRef model =
@@ -700,7 +715,7 @@ initAddGroupCriterionDialogModel : String -> SearchModel -> Group -> Group
 initAddGroupCriterionDialogModel mdrRoot { criteria } group =
     let
         usedMdrKeys =
-            List.map .mdrKey criteria
+            Dict.keys criteria
 
         dialog =
             AddGroupCriterionDialog.init mdrRoot usedMdrKeys
@@ -766,25 +781,13 @@ list of criteria of the search.
 -}
 updateCriterion :
     Urn
-    -> (CriterionModel -> CriterionModel)
+    -> (Maybe CriterionModel -> Maybe CriterionModel)
     -> LoadedModel
     -> LoadedModel
 updateCriterion mdrKey f model =
     let
         updateSearch search =
-            let
-                updateCriteria criteria =
-                    criteria
-                        |> List.map
-                            (\criterion ->
-                                if criterion.mdrKey == mdrKey then
-                                    f criterion
-
-                                else
-                                    criterion
-                            )
-            in
-            { search | criteria = updateCriteria search.criteria }
+            { search | criteria = Dict.update mdrKey f search.criteria }
     in
     { model | search = updateSearch model.search }
 
@@ -803,23 +806,26 @@ editCriterionTask id criterion =
         |> Request.Command.perform
 
 
-addCriterion : DataElementDetail -> Criterion -> LoadedModel -> LoadedModel
-addCriterion elementDetail criterion model =
+addCriterion : Criterion -> LoadedModel -> LoadedModel
+addCriterion criterion =
     let
         criterionModel =
             initCriterionModel criterion
+    in
+    updateCriterion criterion.mdrKey (\_ -> Just criterionModel)
 
-        criterionDetail =
-            initCriterionDetail elementDetail criterion.query
+
+updateCriterionElementDetail : DataElementDetail -> LoadedModel -> LoadedModel
+updateCriterionElementDetail elementDetail =
+    let
+        criterionDetail query =
+            initCriterionDetail elementDetail query
                 |> LoadingStatus.Loaded
 
-        criterionModelWithElementDetail =
-            { criterionModel | loadingCriterionDetail = criterionDetail }
-
-        updateSearch =
-            \search -> { search | criteria = criterionModelWithElementDetail :: search.criteria }
+        updateModel ({ query } as model) =
+            { model | loadingCriterionDetail = criterionDetail query }
     in
-    { model | search = updateSearch model.search }
+    updateCriterion elementDetail.id <| Maybe.map updateModel
 
 
 removeCriterionTask : Id -> Urn -> Task Request.Error Command.Result
@@ -834,22 +840,26 @@ removeCriterionTask id elementId =
 setCriterion : Criterion -> LoadedModel -> LoadedModel
 setCriterion ({ mdrKey } as criterion) =
     updateCriterion mdrKey <|
-        \criterionModel ->
-            { criterionModel | query = criterion.query }
+        Maybe.map <|
+            \model -> { model | query = criterion.query }
 
 
 removeCriterion : Urn -> LoadedModel -> LoadedModel
-removeCriterion elementId model =
-    let
-        updateSearch =
-            \search -> { search | criteria = List.filter (\{ mdrKey } -> mdrKey == elementId) search.criteria }
-    in
-    { model | search = updateSearch model.search }
+removeCriterion mdrKey =
+    updateCriterion mdrKey (\_ -> Nothing)
+
+
+groupBlacklist : List Urn
+groupBlacklist =
+    [ "urn:mdr16:dataelementgroup:1:1"
+    , "urn:mdr16:dataelementgroup:2:1"
+    , "urn:mdr16:dataelementgroup:4:1"
+    ]
 
 
 relevantGroup : DataElementGroup -> Bool
 relevantGroup { id } =
-    True
+    List.member id groupBlacklist |> not
 
 
 loadDataElementGroupMembers : String -> Urn -> Cmd Msg
@@ -858,7 +868,7 @@ loadDataElementGroupMembers mdrRoot groupId =
         |> Task.attempt (DataElementGroupMembersLoaded groupId)
 
 
-loadElementDetail : String -> Urn -> Cmd Msg
+loadElementDetail : String -> Urn -> Cmd LoadedMsg
 loadElementDetail mdrRoot elementId =
     Request.Mdr.dataElement mdrRoot elementId
         |> Task.attempt (DataElementDetailLoaded elementId)
@@ -940,6 +950,7 @@ criterionDialogs model =
     case model of
         Loaded { search, openDialogRef, dialogActionInProgress } ->
             search.criteria
+                |> Dict.values
                 |> List.filterMap maybeLoadedElementDetail
                 |> List.map (renderDialog openDialogRef dialogActionInProgress)
                 |> List.map (Html.map LoadedMsg)
@@ -981,7 +992,7 @@ body model =
 loadedBody : LoadedModel -> List (Html LoadedMsg)
 loadedBody { search, groups } =
     [ Html.div [ Attr.class "mdc-top-app-bar--fixed-adjust" ]
-        [ criterionList search.criteria groups ]
+        [ criterionList (Dict.values search.criteria) groups ]
     ]
 
 
@@ -1165,3 +1176,20 @@ errorPanel =
 subscriptions : Model -> Sub Msg
 subscriptions _ =
     Sub.none
+
+
+eventSubscriptions : Model -> EventSub Msg
+eventSubscriptions model =
+    case model of
+        Loaded { search } ->
+            EventSub.batch
+                [ EventSub.new
+                    [ "search", "criterion-added", search.id ]
+                    (CriterionAddedEvent >> LoadedMsg)
+                , EventSub.new
+                    [ "search", "criterion-edited", search.id ]
+                    (CriterionEditedEvent >> LoadedMsg)
+                ]
+
+        _ ->
+            EventSub.none
