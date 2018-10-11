@@ -108,14 +108,8 @@ type alias InitializedModel =
     , searchStoreSyncToken : Maybe SyncToken
     , webSocketState : WebSocketClient.State Msg
     , eventStreamUrl : String
-    , eventStreamState : StreamState
     , eventSubs : EventSub.State Msg
     }
-
-
-type StreamState
-    = Open
-    | Closed
 
 
 
@@ -145,7 +139,6 @@ init flagsValue url navKey =
                     (websocketProtocol flags.protocol ++ "//" ++ flags.host)
                     [ "api", "event-stream" ]
                     []
-            , eventStreamState = Closed
             , eventSubs = EventSub.init
             }
                 |> wsOpenEventStream
@@ -230,7 +223,7 @@ updateInitialized msg model =
 
 processWebSocketUpdate :
     InitializedModel
-    -> ( State Msg, Response Msg )
+    -> ( WebSocketClient.State Msg, WebSocketClient.Response Msg )
     -> ( InitializedModel, Cmd Msg )
 processWebSocketUpdate model ( state, response ) =
     let
@@ -238,43 +231,40 @@ processWebSocketUpdate model ( state, response ) =
             { model | webSocketState = state }
     in
     case response of
-        NoResponse ->
+        WebSocketClient.NoResponse ->
             ( newModel, Cmd.none )
 
-        CmdResponse cmd ->
+        WebSocketClient.CmdResponse cmd ->
             ( newModel, cmd )
 
-        ConnectedResponse _ ->
-            ( { newModel | eventStreamState = Open, eventSubs = EventSub.init }
-            , Cmd.none
-            )
-
-        MessageReceivedResponse { key, message } ->
+        -- Redo event subscriptions on web socket connection because new
+        -- connections have no subscriptions
+        WebSocketClient.ConnectedResponse _ ->
             let
-                decodedMsg =
-                    Decode.decodeString EventSub.decoder message
-
                 ( newEventSubs, effect ) =
-                    case decodedMsg of
-                        Ok msg ->
-                            EventSub.update (EventSub.InMsg msg) model.eventSubs
-
-                        Err err ->
-                            ( model.eventSubs, EventSub.NoEffect )
+                    EventSub.update EventSub.ReSubscribe model.eventSubs
             in
-            ( { newModel | eventSubs = newEventSubs }
-            , Cmd.none
-            )
-                |> Util.withCmd (sendEffect effect)
-                |> Util.withCmd (processEffectMsg effect)
+            processEventSubEffect effect
+                { newModel | eventSubs = newEventSubs }
 
-        ClosedResponse _ ->
-            { newModel | eventStreamState = Closed }
-                |> wsOpenEventStream
+        WebSocketClient.MessageReceivedResponse { key, message } ->
+            case Decode.decodeString EventSub.decoder message of
+                Ok msg ->
+                    let
+                        ( newEventSubs, effect ) =
+                            EventSub.update (EventSub.InMsg msg) model.eventSubs
+                    in
+                    processEventSubEffect effect
+                        { newModel | eventSubs = newEventSubs }
 
-        ErrorResponse _ ->
-            { newModel | eventStreamState = Closed }
-                |> wsOpenEventStream
+                Err err ->
+                    ( model, Cmd.none )
+
+        WebSocketClient.ClosedResponse closeResp ->
+            ( newModel, Cmd.none )
+
+        WebSocketClient.ErrorResponse error ->
+            ( newModel, Cmd.none )
 
 
 updateSearchStoreSyncToken : PageMsg -> InitializedModel -> InitializedModel
@@ -330,32 +320,33 @@ processPageUpdate ( page, cmd ) model =
     ( { model | page = page, eventSubs = newEventSubs }
     , Cmd.map PageMsg cmd
     )
-        |> Util.withCmd (sendEffect effect)
-        |> Util.withCmd (processEffectMsg effect)
+        |> Util.withCmd (processEventSubEffect effect)
 
 
-sendEffect : EventSub.Effect Msg -> InitializedModel -> ( InitializedModel, Cmd Msg )
-sendEffect effect model =
-    -- only send effects if the stream is open
-    if model.eventStreamState == Open then
-        case EventSub.encodeEffect effect of
-            Just message ->
-                wsSendToEventStream message model
+{-| Process the effect returned by EventSub.
+-}
+processEventSubEffect :
+    EventSub.Effect Msg
+    -> InitializedModel
+    -> ( InitializedModel, Cmd Msg )
+processEventSubEffect effect model =
+    case effect of
+        EventSub.Send msg ->
+            wsSendToEventStream msg model
 
-            Nothing ->
-                ( model, Cmd.none )
-
-    else
-        ( model, Cmd.none )
-
-
-processEffectMsg : EventSub.Effect Msg -> InitializedModel -> ( InitializedModel, Cmd Msg )
-processEffectMsg effect model =
-    case EventSub.effectMsg effect of
-        Just msg ->
+        EventSub.Call msg ->
             updateInitialized msg model
 
-        Nothing ->
+        EventSub.BatchEffect effects ->
+            List.foldl
+                (\effect_ ( resModel, resCmd ) ->
+                    processEventSubEffect effect_ resModel
+                        |> Tuple.mapSecond (\cmd -> Cmd.batch [ cmd, resCmd ])
+                )
+                ( model, Cmd.none )
+                effects
+
+        EventSub.NoEffect ->
             ( model, Cmd.none )
 
 

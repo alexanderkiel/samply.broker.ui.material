@@ -12,8 +12,6 @@ module EventSub exposing
     , Effect(..)
     , update
     , decoder
-    , encodeEffect
-    , effectMsg
     )
 
 {-| Event Subscriptions
@@ -47,8 +45,7 @@ typically go though a web socket but don't need to.
 @docs Effect
 @docs update
 @docs decoder
-@docs encodeEffect
-@docs effectMsg
+@docs processEffect
 
 -}
 
@@ -175,6 +172,7 @@ type SubState msg
 type Msg msg
     = InMsg InMsg
     | EventSub (EventSub msg)
+    | ReSubscribe
 
 
 {-| Incoming messages.
@@ -188,8 +186,7 @@ type InMsg
 {-| Outgoing messages.
 -}
 type Effect msg
-    = Subscribe Topic
-    | UnSubscribe Topic
+    = Send Value
     | Call msg
     | BatchEffect (List (Effect msg))
     | NoEffect
@@ -231,6 +228,36 @@ update msg (State state) =
             EventSub eventSub ->
                 mergeEventSub eventSub state
 
+            -- Resubscribe to all topics
+            ReSubscribe ->
+                let
+                    ( newSubStates, effect ) =
+                        Dict.foldl (TupleExtra.partial2 resubscribe)
+                            ( Dict.empty, NoEffect )
+                            state.subStates
+
+                    resubscribe topic subState =
+                        Tuple.mapBoth (Dict.insert topic) batchEffectHelp <|
+                            case subState of
+                                SubscriptionInProgress callback ->
+                                    ( SubscriptionInProgress callback
+                                    , subscribe topic
+                                    )
+
+                                Subscribed callback ->
+                                    ( SubscriptionInProgress callback
+                                    , subscribe topic
+                                    )
+
+                                UnSubscriptionInProgress callback ->
+                                    ( UnSubscriptionInProgress callback
+                                    , NoEffect
+                                    )
+                in
+                ( { state | subStates = newSubStates }
+                , effect
+                )
+
 
 {-| Merge subscriptions with the state.
 
@@ -260,7 +287,7 @@ mergeEventSub sub state =
         -- spawns a `Subscribe` effect
         subStateInsert topic callback =
             ( Dict.insert topic (SubscriptionInProgress callback)
-            , batchEffectHelp (Subscribe topic)
+            , batchEffectHelp (subscribe topic)
             )
 
         -- updates an old subscription state
@@ -268,41 +295,43 @@ mergeEventSub sub state =
         -- the callback will be updated in every case
         -- spawns a `Subscribe` effect if unsubscription was already in progress
         subStateUpdate topic oldSubState newCallback =
-            case oldSubState of
-                SubscriptionInProgress _ ->
-                    ( Dict.insert topic (SubscriptionInProgress newCallback)
-                    , identity
-                    )
+            Tuple.mapBoth (Dict.insert topic) batchEffectHelp <|
+                case oldSubState of
+                    SubscriptionInProgress _ ->
+                        ( SubscriptionInProgress newCallback
+                        , NoEffect
+                        )
 
-                Subscribed _ ->
-                    ( Dict.insert topic (Subscribed newCallback)
-                    , identity
-                    )
+                    Subscribed _ ->
+                        ( Subscribed newCallback
+                        , NoEffect
+                        )
 
-                UnSubscriptionInProgress _ ->
-                    ( Dict.insert topic (SubscriptionInProgress newCallback)
-                    , batchEffectHelp (Subscribe topic)
-                    )
+                    UnSubscriptionInProgress _ ->
+                        ( SubscriptionInProgress newCallback
+                        , subscribe topic
+                        )
 
         -- keeps the old subscription state because it will only be removed by
         -- unsubscription acknowledgement
         -- spawns an `UnSubscribe` effect unless already spawned
         subStateRemove topic subState =
-            case subState of
-                SubscriptionInProgress callback ->
-                    ( Dict.insert topic (UnSubscriptionInProgress callback)
-                    , batchEffectHelp (UnSubscribe topic)
-                    )
+            Tuple.mapBoth (Dict.insert topic) batchEffectHelp <|
+                case subState of
+                    SubscriptionInProgress callback ->
+                        ( UnSubscriptionInProgress callback
+                        , unSubscribe topic
+                        )
 
-                Subscribed callback ->
-                    ( Dict.insert topic (UnSubscriptionInProgress callback)
-                    , batchEffectHelp (UnSubscribe topic)
-                    )
+                    Subscribed callback ->
+                        ( UnSubscriptionInProgress callback
+                        , unSubscribe topic
+                        )
 
-                UnSubscriptionInProgress _ ->
-                    ( Dict.insert topic subState
-                    , identity
-                    )
+                    UnSubscriptionInProgress _ ->
+                        ( subState
+                        , NoEffect
+                        )
     in
     initSubs sub
         |> mergeIntoSubStates
@@ -361,44 +390,20 @@ setSubscribed subState =
             Subscribed callback
 
 
-encodeEffect : Effect msg -> Maybe Value
-encodeEffect effect =
-    let
-        message type_ topic =
-            Encode.object
-                [ ( "type", Encode.string type_ )
-                , ( "topic", Encode.list Encode.string topic )
-                ]
-    in
-    case effect of
-        Subscribe topic ->
-            Just <| message "subscribe" topic
-
-        UnSubscribe topic ->
-            Just <| message "unsubscribe" topic
-
-        Call _ ->
-            Nothing
-
-        BatchEffect effects ->
-            Just <|
-                Encode.object
-                    [ ( "type", Encode.string "batch" )
-                    , ( "messages", Encode.list identity <| List.filterMap encodeEffect effects )
-                    ]
-
-        NoEffect ->
-            Nothing
+subscribe topic =
+    Send <|
+        Encode.object
+            [ ( "type", Encode.string "subscribe" )
+            , ( "topic", Encode.list Encode.string topic )
+            ]
 
 
-effectMsg : Effect msg -> Maybe msg
-effectMsg effect =
-    case effect of
-        Call msg ->
-            Just msg
-
-        _ ->
-            Nothing
+unSubscribe topic =
+    Send <|
+        Encode.object
+            [ ( "type", Encode.string "unsubscribe" )
+            , ( "topic", Encode.list Encode.string topic )
+            ]
 
 
 decoder : Decoder InMsg
