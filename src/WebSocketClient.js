@@ -13,7 +13,7 @@
 // WebSocketClient is the single global variable defined by this file.
 // It is an object with a `subscribe` property, a function, called as:
 //
-//   WebSocketClientJS.subscribe(app,
+//   require('WebSocketClient.js').subscribe(app,
 //                               [webSocketClientCmdName],
 //                               [webSocketClientSubName]);
 //
@@ -21,11 +21,9 @@
 // webSocketClientSubName defaults to 'webSocketClientCmd'.
 // They name Elm ports.
 
-module.exports = {};
+(function(scope) {
 
-(function() {
-
-    module.exports.subscribe = subscribe;
+    scope.subscribe = subscribe;
 
     var returnPort;
 
@@ -203,4 +201,4 @@ module.exports = {};
         setTimeout(callback, millis);
     }
 
-})();
+})(this);
