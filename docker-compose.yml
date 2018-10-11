@@ -12,5 +12,6 @@ services:
       SEARCH_STORE_ROOT: "http://search-store"
       MDR_ROOT: "https://mdr.germanbiobanknode.de/v3/api/mdr"
       MDR_NAMESPACE: "mdr16"
+      WEBSOCKET_TIMEOUT_SECONDS: "300"
     ports:
     - "8080:80"
