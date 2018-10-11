@@ -125,6 +125,7 @@ type StreamState
 type alias Flags =
     { mdrRoot : String
     , mdrNamespace : String
+    , protocol : String
     , host : String
     }
 
@@ -141,7 +142,7 @@ init flagsValue url navKey =
             , webSocketState = initWebSocketState
             , eventStreamUrl =
                 Url.Builder.crossOrigin
-                    ("ws://" ++ flags.host)
+                    (websocketProtocol flags.protocol ++ "//" ++ flags.host)
                     [ "api", "event-stream" ]
                     []
             , eventStreamState = Closed
@@ -155,6 +156,15 @@ init flagsValue url navKey =
             ( InitError error, Cmd.none )
 
 
+websocketProtocol protocol =
+    case protocol of
+        "http:" ->
+            "ws:"
+
+        _ ->
+            "wss:"
+
+
 initWebSocketState =
     WebSocketClient.makeState <| WebSocketClient.makeConfig webSocketClientCmd
 
@@ -164,6 +174,7 @@ flagsDecoder =
     Decode.succeed Flags
         |> required "mdrRoot" Decode.string
         |> required "mdrNamespace" Decode.string
+        |> required "protocol" Decode.string
         |> required "host" Decode.string
 
 
@@ -259,11 +270,11 @@ processWebSocketUpdate model ( state, response ) =
 
         ClosedResponse _ ->
             { newModel | eventStreamState = Closed }
-              |> wsOpenEventStream
+                |> wsOpenEventStream
 
         ErrorResponse _ ->
             { newModel | eventStreamState = Closed }
-              |> wsOpenEventStream
+                |> wsOpenEventStream
 
 
 updateSearchStoreSyncToken : PageMsg -> InitializedModel -> InitializedModel
@@ -333,6 +344,7 @@ sendEffect effect model =
 
             Nothing ->
                 ( model, Cmd.none )
+
     else
         ( model, Cmd.none )
 
