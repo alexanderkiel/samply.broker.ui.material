@@ -35,7 +35,7 @@ The Docker container needs certain environment variables to be able to run:
 * SEARCH_STORE_ROOT - the base URI of the search store
 * MDR_ROOT - the base URI of the Samply MDR to use
 * MDR_NAMESPACE - the namespace of the MDR to use
-* WEBSOCKET_TIMEOUT_SECONDS - time in seconds after which websockets will timeout. Defaults to 30. 
+* WEBSOCKET_TIMEOUT_SECONDS - time in seconds after which websockets will timeout. Defaults to 60. 
 
 ## Build
 
