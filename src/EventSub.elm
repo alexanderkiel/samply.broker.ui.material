@@ -12,6 +12,7 @@ module EventSub exposing
     , Effect(..)
     , update
     , decoder
+    , subscriptions
     )
 
 {-| Event Subscriptions
@@ -47,6 +48,11 @@ typically go though a web socket but don't need to.
 @docs decoder
 @docs processEffect
 
+
+# Subscriptions
+
+@docs subscriptions
+
 -}
 
 import Data.Event as Event exposing (Event)
@@ -55,6 +61,7 @@ import Dict exposing (Dict)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Decode.Pipeline exposing (hardcoded, required, resolve)
 import Json.Encode as Encode exposing (Value)
+import Time exposing (Posix)
 import Tuple.Extra as TupleExtra
 
 
@@ -149,12 +156,20 @@ type State msg
 
 
 type alias StateRecord msg =
-    { subStates : SubStateDict msg }
+    { subStates : SubStateDict msg
+    , keepAliveDuration : Int
+    }
 
 
-init : State msg
-init =
-    State <| { subStates = Dict.empty }
+{-| Initializes the state.
+
+    `keepAliveDuration` is a time span in seconds after which a `ping` message
+    should be send in order to keep the connection alive.
+
+-}
+init : Int -> State msg
+init keepAliveDuration =
+    State <| { subStates = Dict.empty, keepAliveDuration = keepAliveDuration }
 
 
 type alias SubStateDict msg =
@@ -173,6 +188,7 @@ type Msg msg
     = InMsg InMsg
     | EventSub (EventSub msg)
     | ReSubscribe
+    | KeepAlive
 
 
 {-| Incoming messages.
@@ -218,6 +234,10 @@ batchEffectHelp e res =
                     BatchEffect [ e, res ]
 
 
+
+---- UPDATE -------------------------------------------------------------------
+
+
 update : Msg msg -> State msg -> ( State msg, Effect msg )
 update msg (State state) =
     Tuple.mapFirst State <|
@@ -257,6 +277,9 @@ update msg (State state) =
                 ( { state | subStates = newSubStates }
                 , effect
                 )
+
+            KeepAlive ->
+                ( state, ping )
 
 
 {-| Merge subscriptions with the state.
@@ -390,20 +413,26 @@ setSubscribed subState =
             Subscribed callback
 
 
+subscribe : List String -> Effect msg
 subscribe topic =
-    Send <|
-        Encode.object
-            [ ( "type", Encode.string "subscribe" )
-            , ( "topic", Encode.list Encode.string topic )
-            ]
+    mkSendEffect "subscribe"
+        [ ( "topic", Encode.list Encode.string topic ) ]
 
 
+unSubscribe : List String -> Effect msg
 unSubscribe topic =
-    Send <|
-        Encode.object
-            [ ( "type", Encode.string "unsubscribe" )
-            , ( "topic", Encode.list Encode.string topic )
-            ]
+    mkSendEffect "unsubscribe"
+        [ ( "topic", Encode.list Encode.string topic ) ]
+
+
+ping : Effect msg
+ping =
+    mkSendEffect "ping" []
+
+
+mkSendEffect : String -> List ( String, Value ) -> Effect msg
+mkSendEffect type_ pairs =
+    Send <| Encode.object <| ( "type", Encode.string type_ ) :: pairs
 
 
 decoder : Decoder InMsg
@@ -468,3 +497,12 @@ initNewSubsHelp sub dict =
 
         NoSub ->
             dict
+
+
+
+---- SUBSCRIBE ----------------------------------------------------------------
+
+
+subscriptions : State msg -> Sub (Msg msg)
+subscriptions (State { keepAliveDuration }) =
+    Time.every (toFloat (keepAliveDuration * 1000)) (\_ -> KeepAlive)

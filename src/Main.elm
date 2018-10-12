@@ -25,14 +25,6 @@ import Url exposing (Url)
 import Url.Builder
 import Util
 import WebSocketClient
-    exposing
-        ( Config
-        , PortVersion(..)
-        , Response(..)
-        , State
-        , makeConfig
-        , makeState
-        )
 
 
 
@@ -136,10 +128,10 @@ init flagsValue url navKey =
             , webSocketState = initWebSocketState
             , eventStreamUrl =
                 Url.Builder.crossOrigin
-                    (websocketProtocol flags.protocol ++ "//" ++ flags.host)
+                    (webSocketProtocol flags.protocol ++ "//" ++ flags.host)
                     [ "api", "event-stream" ]
                     []
-            , eventSubs = EventSub.init
+            , eventSubs = EventSub.init 20
             }
                 |> wsOpenEventStream
                 |> Util.withCmd (routeTo url)
@@ -149,7 +141,7 @@ init flagsValue url navKey =
             ( InitError error, Cmd.none )
 
 
-websocketProtocol protocol =
+webSocketProtocol protocol =
     case protocol of
         "http:" ->
             "ws:"
@@ -181,6 +173,7 @@ type Msg
     | Login
     | PageMsg PageMsg
     | WebSocketReceive Value
+    | EventSub (EventSub.Msg Msg)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -220,6 +213,10 @@ updateInitialized msg model =
             WebSocketClient.process model.webSocketState value
                 |> processWebSocketUpdate model
 
+        EventSub eventSubMsg ->
+            EventSub.update eventSubMsg model.eventSubs
+                |> processEventSubUpdate model
+
 
 processWebSocketUpdate :
     InitializedModel
@@ -240,12 +237,8 @@ processWebSocketUpdate model ( state, response ) =
         -- Redo event subscriptions on web socket connection because new
         -- connections have no subscriptions
         WebSocketClient.ConnectedResponse _ ->
-            let
-                ( newEventSubs, effect ) =
-                    EventSub.update EventSub.ReSubscribe model.eventSubs
-            in
-            processEventSubEffect effect
-                { newModel | eventSubs = newEventSubs }
+            EventSub.update EventSub.ReSubscribe model.eventSubs
+                |> processEventSubUpdate newModel
 
         WebSocketClient.MessageReceivedResponse { key, message } ->
             case Decode.decodeString EventSub.decoder message of
@@ -321,6 +314,14 @@ processPageUpdate ( page, cmd ) model =
     , Cmd.map PageMsg cmd
     )
         |> Util.withCmd (processEventSubEffect effect)
+
+
+processEventSubUpdate :
+    InitializedModel
+    -> ( EventSub.State Msg, EventSub.Effect Msg )
+    -> ( InitializedModel, Cmd Msg )
+processEventSubUpdate model ( state, effect ) =
+    processEventSubEffect effect { model | eventSubs = state }
 
 
 {-| Process the effect returned by EventSub.
@@ -407,7 +408,7 @@ loginButton =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     case model of
-        Initialized { page } ->
+        Initialized { page, eventSubs } ->
             let
                 pageSub =
                     case page of
@@ -418,7 +419,11 @@ subscriptions model =
                         _ ->
                             Sub.none
             in
-            Sub.batch [ pageSub, webSocketClientSub WebSocketReceive ]
+            Sub.batch
+                [ pageSub
+                , webSocketClientSub WebSocketReceive
+                , EventSub.subscriptions eventSubs |> Sub.map EventSub
+                ]
 
         InitError _ ->
             Sub.none
@@ -451,13 +456,13 @@ wsSendToEventStream message model =
 
 wsOpen : String -> InitializedModel -> ( InitializedModel, Cmd Msg )
 wsOpen url model =
-    WebSocketClient.open PortVersion2 model.webSocketState url
+    WebSocketClient.open WebSocketClient.PortVersion2 model.webSocketState url
         |> processWebSocketUpdate model
 
 
 wsSend : String -> Value -> InitializedModel -> ( InitializedModel, Cmd Msg )
 wsSend url message model =
-    WebSocketClient.send PortVersion2
+    WebSocketClient.send WebSocketClient.PortVersion2
         model.webSocketState
         url
         (Encode.encode 0 message)
