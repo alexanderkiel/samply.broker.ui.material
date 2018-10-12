@@ -1,3 +1,5 @@
+[![Docker Automated build](https://img.shields.io/docker/automated/akiel/samply.broker.ui.material.svg)](https://hub.docker.com/r/akiel/samply.broker.ui.material/)
+
 # Samply Broker UI Material Prototype
 
 This project contains a prototype of a Samply Broker UI which uses [Material Design][1] as basis. Besides that this prototype tries to showcase the following:
@@ -46,7 +48,7 @@ docker build .
 
 * install [npm][2]
 * run `npm install` to install the required node packages
-* run the search store on port 8080: `docker run -p 8080:8080 -e PORT="8080" -e DATABASE_URI="datomic:mem://store" akiel/samply.broker.search.store:latest`
+* run the search store on port 8080: `docker run -p 8080:8080 -e PORT="8080" -e DATABASE_URI="datomic:mem://store" akiel/samply.broker.ui.material:latest`
 * run `npm run dev` to run an interactive development environment with hot reloading
 * open [http://localhost:3000](http://localhost:3000) in your browser
 
