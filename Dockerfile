@@ -4,8 +4,8 @@ COPY . /build/
 
 WORKDIR /build
 RUN npm install --production
-RUN npm run-script test
-RUN npm run-script build
+RUN npm run test
+RUN npm run build
 
 FROM nginx:1.15.5
 
