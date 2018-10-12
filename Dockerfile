@@ -1,4 +1,4 @@
-FROM node:10.11.0-jessie as build
+FROM node:10.12.0-jessie as build
 
 COPY . /build/
 
