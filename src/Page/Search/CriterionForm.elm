@@ -1,6 +1,7 @@
 module Page.Search.CriterionForm exposing
     ( Model
     , Msg
+    , focusFirstInput
     , getElementDetail
     , init
     , toCriterion
@@ -141,27 +142,41 @@ type DateMsg
     = StartInput String
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case ( msg, model ) of
         ( EnumeratedFormMsg enumeratedMsg, Enumerated enumeratedForm ) ->
-            Enumerated <| EnumeratedForm.update enumeratedMsg enumeratedForm
+            EnumeratedForm.update enumeratedMsg enumeratedForm
+                |> Tuple.mapBoth Enumerated (Cmd.map EnumeratedFormMsg)
 
         ( DateFormMsg dateMsg, Date dateForm ) ->
-            Date <| updateDateForm dateMsg dateForm
+            updateDateForm dateMsg dateForm
+                |> Tuple.mapBoth Date (Cmd.map DateFormMsg)
 
         ( FloatFormMsg floatMsg, Float floatForm ) ->
-            Float <| FloatForm.update floatMsg floatForm
+            FloatForm.update floatMsg floatForm
+                |> Tuple.mapBoth Float (Cmd.map FloatFormMsg)
 
         _ ->
-            model
+            ( model, Cmd.none )
 
 
-updateDateForm : DateMsg -> DateForm -> DateForm
+updateDateForm : DateMsg -> DateForm -> ( DateForm, Cmd DateMsg )
 updateDateForm msg model =
     case msg of
         StartInput _ ->
-            model
+            ( model, Cmd.none )
+
+
+focusFirstInput : Model -> ( Model, Cmd Msg )
+focusFirstInput model =
+    case model of
+        Float floatForm ->
+            FloatForm.update FloatForm.FocusFirstInput floatForm
+                |> Tuple.mapBoth Float (Cmd.map FloatFormMsg)
+
+        _ ->
+            ( model, Cmd.none )
 
 
 

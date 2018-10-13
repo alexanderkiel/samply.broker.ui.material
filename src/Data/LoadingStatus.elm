@@ -3,6 +3,7 @@ module Data.LoadingStatus exposing
     , isLoaded
     , isNotFound
     , mapLoaded
+    , mapLoaded2
     , slowThreshold
     )
 
@@ -79,6 +80,22 @@ mapLoaded f status =
 
         Failed error ->
             Failed error
+
+
+mapLoaded2 : (a -> ( b, Cmd msg )) -> LoadingStatus a -> ( LoadingStatus b, Cmd msg )
+mapLoaded2 f status =
+    case status of
+        Loading ->
+            ( Loading, Cmd.none )
+
+        LoadingSlowly ->
+            ( LoadingSlowly, Cmd.none )
+
+        Loaded x ->
+            f x |> Tuple.mapFirst Loaded
+
+        Failed error ->
+            ( Failed error, Cmd.none )
 
 
 slowThreshold : Task x ()

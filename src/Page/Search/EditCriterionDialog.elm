@@ -1,6 +1,7 @@
 module Page.Search.EditCriterionDialog exposing
     ( Model
     , Msg
+    , focusFirstInput
     , init
     , update
     , view
@@ -30,9 +31,14 @@ type alias Msg =
     CriterionForm.Msg
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update =
     CriterionForm.update
+
+
+focusFirstInput : Model -> ( Model, Cmd Msg )
+focusFirstInput =
+    CriterionForm.focusFirstInput
 
 
 

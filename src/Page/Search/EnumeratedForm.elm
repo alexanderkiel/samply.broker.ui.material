@@ -61,11 +61,13 @@ type Msg
     = ToggleSelection String
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         ToggleSelection selectedValue ->
-            { model | valueSelects = toggleSelection selectedValue model.valueSelects }
+            ( { model | valueSelects = toggleSelection selectedValue model.valueSelects }
+            , Cmd.none
+            )
 
 
 toggleSelection : String -> List ValueSelect -> List ValueSelect

@@ -38,6 +38,8 @@ module Page.Search exposing
 -}
 
 import Browser exposing (Document)
+import Browser.Dom as Dom
+import Cmd.Extra exposing (addCmd)
 import Data.Command as Command exposing (SyncToken, commandBuilder, jsonCommand)
 import Data.Event exposing (Event)
 import Data.Interval as Interval
@@ -71,6 +73,7 @@ import Request.Error as Request
 import Request.Mdr
 import Request.Search
 import Task exposing (Task)
+import Util exposing (withCmd)
 
 
 {-| The model.
@@ -94,13 +97,18 @@ type LoadingModel
     | GroupLoadingFailed String Request.Error
 
 
+{-| Like `Data.Search` but the criteria are a dict from criterion `mdrKey` to
+`CriterionModel`.
+-}
 type alias SearchModel =
     { id : Id
     , title : String
-    , criteria : Dict String CriterionModel
+    , criteria : Dict Urn CriterionModel
     }
 
 
+{-| Like `Data.Search.Criterion` but with added loading `CriterionDetail`.
+-}
 type alias CriterionModel =
     { mdrKey : Urn
     , query : Criterion.Query
@@ -108,19 +116,33 @@ type alias CriterionModel =
     }
 
 
+{-| Contains the `DataElementDetail` needed in the view and the edit dialog.
+-}
 type alias CriterionDetail =
     { elementDetail : DataElementDetail
     , dialog : EditCriterionDialog.Model
     }
 
 
+{-| A `DataElementGroup` with its loading `GroupDetail`.
+-}
 type alias Group =
     { group : DataElementGroup
-    , loadingMembers : LoadingStatus (List DataElement)
+    , loadingGroupDetail : LoadingStatus GroupDetail
+    }
+
+
+{-| Includes the grouop members and the `AddGroupCriterionDialog`.
+-}
+type alias GroupDetail =
+    { members : List DataElement
     , addGroupCriterionDialog : AddGroupCriterionDialog.Model
     }
 
 
+{-| Model active if the search and the groups are loaded. The details may still
+load.
+-}
 type alias LoadedModel =
     { mdrRoot : String
     , search : SearchModel
@@ -232,7 +254,7 @@ type LoadedMsg
     | AddGroupCriterionDialogMsg Urn AddGroupCriterionDialog.Msg
     | AddGroupCriterion DataElementDetail Criterion
     | CriterionAdded DataElementDetail Criterion (Result Request.Error Command.Result)
-    | OpenCriterionDialog Urn
+    | OpenEditCriterionDialog Urn
     | CloseCriterionDialog Urn
     | CriterionDialogMsg Urn EditCriterionDialog.Msg
     | SaveCriterion Criterion
@@ -241,6 +263,7 @@ type LoadedMsg
     | CriterionRemoved Urn (Result Request.Error Command.Result)
     | CriterionAddedEvent Event
     | CriterionEditedEvent Event
+    | NoOp
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -317,7 +340,7 @@ update msg model =
                         updateLoadingModel lift loadingModel =
                             case loadingModel of
                                 GroupsLoaded mdrRoot groups ->
-                                    setGroupElements groupId relevantMembers groups
+                                    setGroupMembers mdrRoot groupId [] relevantMembers groups
                                         |> GroupsLoaded mdrRoot
                                         |> lift
 
@@ -335,7 +358,7 @@ update msg model =
                             updateLoadingModel SlowLoading loadingModel
 
                         Loaded loadedModel ->
-                            Loaded { loadedModel | groups = setGroupElements groupId relevantMembers loadedModel.groups }
+                            Loaded { loadedModel | groups = setGroupMembers loadedModel.mdrRoot groupId (getUsedMdrKeys loadedModel.search) relevantMembers loadedModel.groups }
 
                         -- End state
                         Failed _ ->
@@ -366,21 +389,23 @@ markAsSlowLoading loadingModel =
             loadingModel
 
 
+markGroupsAsSlowLoading : Dict Urn Group -> Dict Urn Group
 markGroupsAsSlowLoading =
     Dict.map <|
         \_ group ->
             let
-                newLoadingMembers =
-                    case group.loadingMembers of
+                newLoadingGroupDetail =
+                    case group.loadingGroupDetail of
                         LoadingStatus.Loading ->
                             LoadingStatus.LoadingSlowly
 
                         _ ->
-                            group.loadingMembers
+                            group.loadingGroupDetail
             in
-            { group | loadingMembers = newLoadingMembers }
+            { group | loadingGroupDetail = newLoadingGroupDetail }
 
 
+markSearchModelAsSlowLoading : SearchModel -> SearchModel
 markSearchModelAsSlowLoading search =
     let
         updateCriteria f =
@@ -403,17 +428,24 @@ type UpdateAtStartResult
     | FinishedLoading LoadedModel
 
 
-setGroupElements : Urn -> List DataElement -> Dict Urn Group -> Dict Urn Group
-setGroupElements groupId elements =
-    (\group -> { group | loadingMembers = LoadingStatus.Loaded elements })
-        |> Maybe.map
-        |> Dict.update groupId
+setGroupMembers : String -> Urn -> List Urn -> List DataElement -> Dict Urn Group -> Dict Urn Group
+setGroupMembers mdrRoot groupId usedMdrKeys members =
+    let
+        updateGroup group =
+            { group | loadingGroupDetail = LoadingStatus.Loaded newGroupDetail }
+
+        newGroupDetail =
+            { members = members
+            , addGroupCriterionDialog = AddGroupCriterionDialog.init mdrRoot usedMdrKeys members
+            }
+    in
+    Dict.update groupId (Maybe.map updateGroup)
 
 
 updateAtStart :
     StartMsg
     -> LoadingModel
-    -> LoadingStatus (List DataElement)
+    -> LoadingStatus GroupDetail
     -> ( UpdateAtStartResult, Cmd Msg )
 updateAtStart msg model loadingTag =
     case msg of
@@ -481,8 +513,7 @@ updateAtStart msg model loadingTag =
                                     (\({ id } as group) ->
                                         ( id
                                         , { group = group
-                                          , loadingMembers = loadingTag
-                                          , addGroupCriterionDialog = AddGroupCriterionDialog.init (getMdrRoot model) []
+                                          , loadingGroupDetail = loadingTag
                                           }
                                         )
                                     )
@@ -566,19 +597,19 @@ updateAfterLoading msg model =
             )
 
         OpenAddGroupCriterionDialog groupId ->
-            ( (updateGroup groupId (initAddGroupCriterionDialogModel model.mdrRoot model.search)
-                >> openDialog (AddGroupCriterionDialogRef groupId)
-              )
+            updateGroupWithinLoadedModel2 groupId
+                (resetAddGroupCriterionDialogWithinGroupDetail model.mdrRoot model.search
+                    |> updateLoadedDetailWithinGroup
+                )
                 model
-            , Cmd.none
-            )
+                |> Tuple.mapBoth (openDialog (AddGroupCriterionDialogRef groupId))
+                    (Cmd.map (AddGroupCriterionDialogMsg groupId))
 
         CloseAddGroupCriterionDialog ->
             ( closeDialog model, Cmd.none )
 
         AddGroupCriterionDialogMsg groupId dialogMsg ->
-            updateGroup2
-                groupId
+            updateGroupWithinLoadedModel2 groupId
                 (AddGroupCriterionDialog.update dialogMsg
                     |> updateAddGroupCriterionDialogModel
                 )
@@ -591,24 +622,31 @@ updateAfterLoading msg model =
                 |> Task.attempt (CriterionAdded elementDetail criterion)
             )
 
-        OpenCriterionDialog mdrKey ->
-            ( openDialog (EditCriterionDialogRef mdrKey) model, Cmd.none )
+        OpenEditCriterionDialog mdrKey ->
+            model
+                |> updateCriterionModelWithinLoadedModel
+                    mdrKey
+                    (EditCriterionDialog.focusFirstInput
+                        |> updateCriterionDialogModel
+                        |> LoadingStatus.mapLoaded2
+                        |> updateLoadingCriterionDetail
+                        |> Maybe.map
+                    )
+                |> Tuple.mapFirst (openDialog (EditCriterionDialogRef mdrKey))
 
         CloseCriterionDialog elementId ->
             ( closeDialog model, Cmd.none )
 
         CriterionDialogMsg mdrKey dialogMsg ->
-            ( updateCriterion
+            updateCriterionModelWithinLoadedModel
                 mdrKey
                 (EditCriterionDialog.update dialogMsg
                     |> updateCriterionDialogModel
-                    |> LoadingStatus.mapLoaded
+                    |> LoadingStatus.mapLoaded2
                     |> updateLoadingCriterionDetail
                     |> Maybe.map
                 )
                 model
-            , Cmd.none
-            )
 
         SaveCriterion criterion ->
             ( setDialogActionInProgress True model
@@ -625,12 +663,10 @@ updateAfterLoading msg model =
         CriterionAdded elementDetail criterion result ->
             case result of
                 Ok _ ->
-                    ( model
+                    model
                         |> addCriterion criterion
-                        |> updateCriterionElementDetail elementDetail
-                        |> closeDialog
-                    , Cmd.none
-                    )
+                        |> withCmd (updateCriterionElementDetail elementDetail)
+                        |> Tuple.mapFirst closeDialog
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -638,9 +674,8 @@ updateAfterLoading msg model =
         CriterionSaved criterion result ->
             case result of
                 Ok _ ->
-                    ( (setCriterion criterion >> closeDialog) model
-                    , Cmd.none
-                    )
+                    mergeCriterion criterion model
+                        |> Tuple.mapFirst closeDialog
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -648,12 +683,8 @@ updateAfterLoading msg model =
         CriterionRemoved elementId result ->
             case result of
                 Ok _ ->
-                    ( (removeCriterion elementId
-                        >> setDialogActionInProgress False
-                      )
-                        model
-                    , Cmd.none
-                    )
+                    removeCriterion elementId model
+                        |> Tuple.mapFirst (setDialogActionInProgress False)
 
                 Err _ ->
                     ( model, Cmd.none )
@@ -661,9 +692,8 @@ updateAfterLoading msg model =
         CriterionAddedEvent event ->
             case decodeValue Criterion.decoder event.data of
                 Ok criterion ->
-                    ( addCriterion criterion model
-                    , loadElementDetail model.mdrRoot criterion.mdrKey
-                    )
+                    addCriterion criterion model
+                        |> addCmd (loadElementDetail model.mdrRoot criterion.mdrKey)
 
                 Err error ->
                     ( model, Cmd.none )
@@ -671,12 +701,21 @@ updateAfterLoading msg model =
         CriterionEditedEvent event ->
             case decodeValue Criterion.decoder event.data of
                 Ok criterion ->
-                    ( setCriterion criterion model
-                    , Cmd.none
-                    )
+                    mergeCriterion criterion model
 
                 Err error ->
                     ( model, Cmd.none )
+
+        NoOp ->
+            ( model, Cmd.none )
+
+
+focusAddGroupCriterionDialog :
+    AddGroupCriterionDialog.Model
+    -> ( AddGroupCriterionDialog.Model, Cmd AddGroupCriterionDialog.Msg )
+focusAddGroupCriterionDialog model =
+    AddGroupCriterionDialog.update AddGroupCriterionDialog.FocusSelectedMember
+        model
 
 
 addElementDetail : Urn -> DataElementDetail -> LoadedModel -> LoadedModel
@@ -711,24 +750,60 @@ closeDialog model =
     { model | openDialogRef = Nothing, dialogActionInProgress = False }
 
 
-initAddGroupCriterionDialogModel : String -> SearchModel -> Group -> Group
-initAddGroupCriterionDialogModel mdrRoot { criteria } group =
+resetAddGroupCriterionDialogWithinGroupDetail :
+    String
+    -> SearchModel
+    -> GroupDetail
+    -> ( GroupDetail, Cmd AddGroupCriterionDialog.Msg )
+resetAddGroupCriterionDialogWithinGroupDetail mdrRoot search groupDetail =
     let
-        usedMdrKeys =
-            Dict.keys criteria
+        newDialog =
+            AddGroupCriterionDialog.init mdrRoot
+                (getUsedMdrKeys search)
+                groupDetail.members
 
-        dialog =
-            AddGroupCriterionDialog.init mdrRoot usedMdrKeys
+        ( newDialog2, cmd ) =
+            focusAddGroupCriterionDialog newDialog
     in
-    { group | addGroupCriterionDialog = dialog }
+    ( { groupDetail | addGroupCriterionDialog = newDialog2 }
+    , cmd
+    )
 
 
+updateLoadedDetailWithinGroup :
+    (GroupDetail -> ( GroupDetail, Cmd msg ))
+    -> Group
+    -> ( Group, Cmd msg )
+updateLoadedDetailWithinGroup f group =
+    let
+        ( newLoadingGroupDetail, cmd ) =
+            LoadingStatus.mapLoaded2 f group.loadingGroupDetail
+    in
+    ( { group | loadingGroupDetail = newLoadingGroupDetail }, cmd )
+
+
+getUsedMdrKeys : SearchModel -> List Urn
+getUsedMdrKeys { criteria } =
+    Dict.keys criteria
+
+
+updateAddGroupCriterionDialogModel :
+    (AddGroupCriterionDialog.Model -> ( AddGroupCriterionDialog.Model, Cmd AddGroupCriterionDialog.Msg ))
+    -> Group
+    -> ( Group, Cmd AddGroupCriterionDialog.Msg )
 updateAddGroupCriterionDialogModel f group =
     let
-        ( newDialog, cmd ) =
-            f group.addGroupCriterionDialog
+        ( newLoadingGroupDetail, cmd ) =
+            LoadingStatus.mapLoaded2 updateGroupDetail group.loadingGroupDetail
+
+        updateGroupDetail groupDetail =
+            let
+                ( newDialog, cmd_ ) =
+                    f groupDetail.addGroupCriterionDialog
+            in
+            ( { groupDetail | addGroupCriterionDialog = newDialog }, cmd_ )
     in
-    ( { group | addGroupCriterionDialog = newDialog }, cmd )
+    ( { group | loadingGroupDetail = newLoadingGroupDetail }, cmd )
 
 
 setDialogActionInProgress : Bool -> LoadedModel -> LoadedModel
@@ -736,7 +811,8 @@ setDialogActionInProgress inProgress model =
     { model | dialogActionInProgress = inProgress }
 
 
-updateGroup groupId f model =
+updateGroupWithinLoadedModel : Urn -> (Group -> Group) -> LoadedModel -> LoadedModel
+updateGroupWithinLoadedModel groupId f model =
     let
         updateGroups =
             f
@@ -748,12 +824,12 @@ updateGroup groupId f model =
 
 {-| Updates the group with `groupId` inside `model` and carries a command.
 -}
-updateGroup2 :
+updateGroupWithinLoadedModel2 :
     Urn
     -> (Group -> ( Group, Cmd msg ))
     -> LoadedModel
     -> ( LoadedModel, Cmd msg )
-updateGroup2 groupId f model =
+updateGroupWithinLoadedModel2 groupId f model =
     case Dict.get groupId model.groups of
         Just group ->
             let
@@ -768,28 +844,41 @@ updateGroup2 groupId f model =
             ( model, Cmd.none )
 
 
+updateCriterionDialogModel :
+    (EditCriterionDialog.Model -> ( EditCriterionDialog.Model, Cmd EditCriterionDialog.Msg ))
+    -> CriterionDetail
+    -> ( CriterionDetail, Cmd EditCriterionDialog.Msg )
 updateCriterionDialogModel f criterionDetail =
-    { criterionDetail | dialog = f criterionDetail.dialog }
+    f criterionDetail.dialog
+        |> Tuple.mapFirst (\dialog -> { criterionDetail | dialog = dialog })
 
 
+updateLoadingCriterionDetail :
+    (LoadingStatus CriterionDetail -> ( LoadingStatus CriterionDetail, Cmd EditCriterionDialog.Msg ))
+    -> CriterionModel
+    -> ( CriterionModel, Cmd EditCriterionDialog.Msg )
 updateLoadingCriterionDetail f criterion =
-    { criterion | loadingCriterionDetail = f criterion.loadingCriterionDetail }
+    f criterion.loadingCriterionDetail
+        |> Tuple.mapFirst (\detail -> { criterion | loadingCriterionDetail = detail })
 
 
-{-| Updates the criterion with the given `mdrKey` using the function `f` in the
-list of criteria of the search.
+{-| Updates the criterion model with the given `mdrKey` using the function `f`
+in the list of criteria of the search.
 -}
-updateCriterion :
+updateCriterionModelWithinLoadedModel :
     Urn
-    -> (Maybe CriterionModel -> Maybe CriterionModel)
+    -> (Maybe CriterionModel -> Maybe ( CriterionModel, Cmd EditCriterionDialog.Msg ))
     -> LoadedModel
-    -> LoadedModel
-updateCriterion mdrKey f model =
+    -> ( LoadedModel, Cmd LoadedMsg )
+updateCriterionModelWithinLoadedModel mdrKey f model =
     let
         updateSearch search =
-            { search | criteria = Dict.update mdrKey f search.criteria }
+            Util.dictUpdateWithCmd mdrKey f search.criteria
+                |> Tuple.mapFirst (\criteria -> { search | criteria = criteria })
     in
-    { model | search = updateSearch model.search }
+    updateSearch model.search
+        |> Tuple.mapBoth (\search -> { model | search = search })
+            (Cmd.map (CriterionDialogMsg mdrKey))
 
 
 addCriterionTask : Id -> Criterion -> Task Request.Error Command.Result
@@ -806,26 +895,28 @@ editCriterionTask id criterion =
         |> Request.Command.perform
 
 
-addCriterion : Criterion -> LoadedModel -> LoadedModel
+addCriterion : Criterion -> LoadedModel -> ( LoadedModel, Cmd LoadedMsg )
 addCriterion criterion =
     let
         criterionModel =
             initCriterionModel criterion
     in
-    updateCriterion criterion.mdrKey (\_ -> Just criterionModel)
+    updateCriterionModelWithinLoadedModel criterion.mdrKey (\_ -> Just ( criterionModel, Cmd.none ))
 
 
-updateCriterionElementDetail : DataElementDetail -> LoadedModel -> LoadedModel
+updateCriterionElementDetail : DataElementDetail -> LoadedModel -> ( LoadedModel, Cmd LoadedMsg )
 updateCriterionElementDetail elementDetail =
     let
-        criterionDetail query =
+        updateCriterionModel ({ query } as criterionModel) =
+            ( { criterionModel | loadingCriterionDetail = initLoadedCriterionDetail query }
+            , Cmd.none
+            )
+
+        initLoadedCriterionDetail query =
             initCriterionDetail elementDetail query
                 |> LoadingStatus.Loaded
-
-        updateModel ({ query } as model) =
-            { model | loadingCriterionDetail = criterionDetail query }
     in
-    updateCriterion elementDetail.id <| Maybe.map updateModel
+    updateCriterionModelWithinLoadedModel elementDetail.id (Maybe.map updateCriterionModel)
 
 
 removeCriterionTask : Id -> Urn -> Task Request.Error Command.Result
@@ -837,16 +928,20 @@ removeCriterionTask id elementId =
         |> Request.Command.perform
 
 
-setCriterion : Criterion -> LoadedModel -> LoadedModel
-setCriterion ({ mdrKey } as criterion) =
-    updateCriterion mdrKey <|
-        Maybe.map <|
-            \model -> { model | query = criterion.query }
+{-| Merges data from `criterion` into the `loadedModel`.
+-}
+mergeCriterion : Criterion -> LoadedModel -> ( LoadedModel, Cmd LoadedMsg )
+mergeCriterion ({ mdrKey } as criterion) =
+    let
+        updateCriterionModel model =
+            ( { model | query = criterion.query }, Cmd.none )
+    in
+    updateCriterionModelWithinLoadedModel mdrKey (Maybe.map updateCriterionModel)
 
 
-removeCriterion : Urn -> LoadedModel -> LoadedModel
+removeCriterion : Urn -> LoadedModel -> ( LoadedModel, Cmd LoadedMsg )
 removeCriterion mdrKey =
-    updateCriterion mdrKey (\_ -> Nothing)
+    updateCriterionModelWithinLoadedModel mdrKey (\_ -> Nothing)
 
 
 groupBlacklist : List Urn
@@ -911,17 +1006,21 @@ appBar name =
 addGroupCriterionDialogs : Model -> List (Html Msg)
 addGroupCriterionDialogs model =
     let
-        viewDialog openDialogRef dialogActionInProgress { group, loadingMembers, addGroupCriterionDialog } =
-            AddGroupCriterionDialog.view
-                { onOk = AddGroupCriterion
-                , onCancel = CloseAddGroupCriterionDialog
-                , map = AddGroupCriterionDialogMsg group.id
-                }
-                addGroupCriterionDialog
-                group
-                loadingMembers
-                (Just (AddGroupCriterionDialogRef group.id) == openDialogRef)
-                dialogActionInProgress
+        viewDialog openDialogRef dialogActionInProgress { group, loadingGroupDetail } =
+            case loadingGroupDetail of
+                LoadingStatus.Loaded groupDetail ->
+                    AddGroupCriterionDialog.view
+                        { onOk = AddGroupCriterion
+                        , onCancel = CloseAddGroupCriterionDialog
+                        , map = AddGroupCriterionDialogMsg group.id
+                        }
+                        groupDetail.addGroupCriterionDialog
+                        group
+                        (Just (AddGroupCriterionDialogRef group.id) == openDialogRef)
+                        dialogActionInProgress
+
+                _ ->
+                    Html.text ""
     in
     case model of
         Loaded { groups, openDialogRef, dialogActionInProgress } ->
@@ -1005,14 +1104,15 @@ criterionList : List CriterionModel -> Dict Urn Group -> Html LoadedMsg
 criterionList criteria groups =
     groups
         |> Dict.values
-        |> List.map (renderGroup criteria)
+        |> List.map (renderGroupCard criteria)
+        |> List.map (\card -> LayoutGrid.cell [] [ card ])
         |> LayoutGrid.view []
 
 
 {-| Renders a data element group like Donor or Sample.
 
-    Returns a list with the groups designation as subheader and matching
-    criteria as items when the group members are loaded. Group members are
+    Returns a card with the groups designation as title and matching
+    criteria as list items when the group members are loaded. Group members are
     needed to find matching criteria.
 
     See `criterionItem` for the item rendering.
@@ -1022,20 +1122,22 @@ criterionList criteria groups =
     Includes an "add criterion" button at the end of the list.
 
 -}
-renderGroup : List CriterionModel -> Group -> Html LoadedMsg
-renderGroup criteria { group, loadingMembers } =
+renderGroupCard : List CriterionModel -> Group -> Html LoadedMsg
+renderGroupCard criteria { group, loadingGroupDetail } =
     let
-        render criterion =
-            LayoutGrid.cell []
-                [ Card.view []
-                    [ Html.h2 [ Attr.class "criteria-group__title" ]
-                        [ Html.text group.designation ]
-                    , List.view [ List.twoLine ] <|
-                        List.map criterionItem criterion
-                    , Card.actions []
-                        [ addGroupCriterionButton group.id
-                        ]
-                    ]
+        noActions =
+            Html.text ""
+
+        loadedActions =
+            Card.actions [] [ addGroupCriterionButton group.id ]
+
+        render actions joinedCriteria =
+            Card.view []
+                [ Html.h2 [ Attr.class "criteria-group__title" ]
+                    [ Html.text group.designation ]
+                , List.view [ List.twoLine ] <|
+                    List.map criterionItem joinedCriteria
+                , actions
                 ]
 
         joinWithMember members ({ mdrKey } as criterion) =
@@ -1044,24 +1146,24 @@ renderGroup criteria { group, loadingMembers } =
                 |> List.head
                 |> Maybe.map (\member -> ( criterion, member ))
     in
-    case loadingMembers of
+    case loadingGroupDetail of
         -- Don't show anything on still fast loading members
         Loading ->
             Html.text ""
 
-        -- Members are slow loading, just show what we have
+        -- Members are slow loading, just show the title
         LoadingSlowly ->
-            render []
+            render noActions []
 
         -- We have everything, just render the matching criteria
-        LoadingStatus.Loaded members ->
+        LoadingStatus.Loaded detail ->
             criteria
-                |> List.filterMap (joinWithMember members)
-                |> render
+                |> List.filterMap (joinWithMember detail.members)
+                |> render loadedActions
 
         -- TODO: show error message
         LoadingStatus.Failed _ ->
-            render []
+            render noActions []
 
 
 criterionItem : ( CriterionModel, DataElement ) -> ( String, Html LoadedMsg )
@@ -1128,7 +1230,7 @@ criterionItem ( { mdrKey, query, loadingCriterionDetail }, { designation } ) =
     in
     ( mdrKey
     , List.item
-        [ Options.onClick <| OpenCriterionDialog mdrKey ]
+        [ Options.onClick <| OpenEditCriterionDialog mdrKey ]
         [ List.text []
             [ List.primaryText [] [ Html.text designation ]
             , List.secondaryText [] [ Html.text queryText ]

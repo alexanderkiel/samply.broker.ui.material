@@ -1,12 +1,38 @@
 module Page.Search.FloatForm exposing
     ( Model
-    , Msg
+    , QueryType(..)
     , init
     , toMetricQuery
+    , Msg(..)
     , update
     , view
     )
 
+{-| This module contains a form were the user can create or edit a
+`Criterion.MetricQuery` with float values.
+
+
+# Model
+
+@docs Model
+@docs QueryType
+@docs init
+@docs toMetricQuery
+
+
+# Update
+
+@docs Msg
+@docs update
+
+
+# View
+
+@docs view
+
+-}
+
+import Browser.Dom as Dom
 import Data.Interval as Interval exposing (Interval)
 import Data.Mdr.DataElement as DataElement exposing (DataElementDetail)
 import Data.Search.Criterion as Criterion
@@ -21,6 +47,7 @@ import Material.Select as Select
 import Material.TextField as TextField
 import Material.TextField.HelperText as HelperText
 import Parser.Decimal as Parser exposing (parser)
+import Task
 
 
 
@@ -29,10 +56,17 @@ import Parser.Decimal as Parser exposing (parser)
 
 type alias Model =
     { elementDetail : DataElementDetail
-    , queryTypeSelect : Select.Model
+    , queryType : QueryType
     , lowerBound : Bound
     , upperBound : Bound
     }
+
+
+type QueryType
+    = LessThan
+    | GreaterThan
+    | Between
+    | Outside
 
 
 type alias Bound =
@@ -47,37 +81,37 @@ init elementDetail maybeQuery =
                 Just query ->
                     case query of
                         Criterion.LessThan value ->
-                            ( Just "lessThan"
+                            ( LessThan
                             , initBound Nothing
                             , initBound <| Just value
                             )
 
                         Criterion.GreaterThan value ->
-                            ( Just "greaterThan"
+                            ( GreaterThan
                             , initBound <| Just value
                             , initBound Nothing
                             )
 
                         Criterion.Between lowerValue upperValue ->
-                            ( Just "between"
+                            ( Between
                             , initBound <| Just lowerValue
                             , initBound <| Just upperValue
                             )
 
                         Criterion.Outside lowerValue upperValue ->
-                            ( Just "outside"
+                            ( Outside
                             , initBound <| Just lowerValue
                             , initBound <| Just upperValue
                             )
 
                 Nothing ->
-                    ( Nothing
+                    ( LessThan
                     , initBound Nothing
                     , initBound Nothing
                     )
     in
     { elementDetail = elementDetail
-    , queryTypeSelect = Select.init queryType
+    , queryType = queryType
     , lowerBound = lowerBound
     , upperBound = upperBound
     }
@@ -89,30 +123,23 @@ initBound value =
 
 
 toMetricQuery : Model -> Maybe (Criterion.MetricQuery Float)
-toMetricQuery { queryTypeSelect, lowerBound, upperBound } =
-    queryTypeSelect.value
-        |> Maybe.andThen
-            (\queryType ->
-                case queryType of
-                    "lessThan" ->
-                        Maybe.map Criterion.LessThan upperBound.textField.value
+toMetricQuery { queryType, lowerBound, upperBound } =
+    case queryType of
+        LessThan ->
+            Maybe.map Criterion.LessThan upperBound.textField.value
 
-                    "greaterThan" ->
-                        Maybe.map Criterion.GreaterThan lowerBound.textField.value
+        GreaterThan ->
+            Maybe.map Criterion.GreaterThan lowerBound.textField.value
 
-                    "between" ->
-                        Maybe.map2 Criterion.Between
-                            lowerBound.textField.value
-                            upperBound.textField.value
+        Between ->
+            Maybe.map2 Criterion.Between
+                lowerBound.textField.value
+                upperBound.textField.value
 
-                    "outside" ->
-                        Maybe.map2 Criterion.Outside
-                            lowerBound.textField.value
-                            upperBound.textField.value
-
-                    _ ->
-                        Nothing
-            )
+        Outside ->
+            Maybe.map2 Criterion.Outside
+                lowerBound.textField.value
+                upperBound.textField.value
 
 
 
@@ -120,26 +147,58 @@ toMetricQuery { queryTypeSelect, lowerBound, upperBound } =
 
 
 type Msg
-    = QueryTypeMsg Select.Msg
+    = SelectQueryType QueryType
     | LowerBoundMsg BoundMsg
     | UpperBoundMsg BoundMsg
+    | FocusFirstInput
+    | NoOp
 
 
 type BoundMsg
     = TextFieldMsg TextField.Msg
 
 
-update : Msg -> Model -> Model
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        QueryTypeMsg queryTypeMsg ->
-            { model | queryTypeSelect = Select.update queryTypeMsg model.queryTypeSelect }
+        SelectQueryType queryType ->
+            ( { model | queryType = queryType }
+            , (case queryType of
+                LessThan ->
+                    focusUpperBoundInput
+
+                GreaterThan ->
+                    focusLowerBoundInput
+
+                Between ->
+                    focusLowerBoundInput
+
+                Outside ->
+                    focusLowerBoundInput
+              )
+                model.elementDetail.id
+            )
 
         LowerBoundMsg lowerBoundMsg ->
-            { model | lowerBound = updateBound lowerBoundMsg model.lowerBound }
+            ( { model | lowerBound = updateBound lowerBoundMsg model.lowerBound }
+            , Cmd.none
+            )
 
         UpperBoundMsg upperBoundMsg ->
-            { model | upperBound = updateBound upperBoundMsg model.upperBound }
+            ( { model | upperBound = updateBound upperBoundMsg model.upperBound }
+            , Cmd.none
+            )
+
+        FocusFirstInput ->
+            case model.queryType of
+                LessThan ->
+                    ( model, focusUpperBoundInput model.elementDetail.id )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        NoOp ->
+            ( model, Cmd.none )
 
 
 updateBound : BoundMsg -> Bound -> Bound
@@ -149,30 +208,42 @@ updateBound msg bound =
             { bound | textField = TextField.update textFieldMsg bound.textField }
 
 
+focusLowerBoundInput : Urn -> Cmd Msg
+focusLowerBoundInput id =
+    Dom.focus ("criterion-float-lower-bound-" ++ id)
+        |> Task.attempt (\_ -> NoOp)
+
+
+focusUpperBoundInput : Urn -> Cmd Msg
+focusUpperBoundInput id =
+    Dom.focus ("criterion-float-upper-bound-" ++ id)
+        |> Task.attempt (\_ -> NoOp)
+
+
 
 ---- VIEW ---------------------------------------------------------------------
 
 
 type BoundModifier
-    = Normal
-    | Outside
+    = NormalBound
+    | OutsideBound
 
 
 view : Model -> Html Msg
-view { elementDetail, queryTypeSelect, lowerBound, upperBound } =
+view { elementDetail, queryType, lowerBound, upperBound } =
     let
         lowerBoundInput modifier =
             boundInput elementDetail
                 (elementDetail.designation
                     ++ (case modifier of
-                            Normal ->
+                            NormalBound ->
                                 " should be bigger than this"
 
-                            Outside ->
+                            OutsideBound ->
                                 " should be smaller than this"
                        )
                 )
-                "criterion-float-lower-bound"
+                ("criterion-float-lower-bound-" ++ elementDetail.id)
                 "Lower Bound"
                 lowerBound
                 |> Html.map LowerBoundMsg
@@ -181,14 +252,14 @@ view { elementDetail, queryTypeSelect, lowerBound, upperBound } =
             boundInput elementDetail
                 (elementDetail.designation
                     ++ (case modifier of
-                            Normal ->
+                            NormalBound ->
                                 " should be smaller than this"
 
-                            Outside ->
+                            OutsideBound ->
                                 " should be bigger than this"
                        )
                 )
-                "criterion-float-upper-bound"
+                ("criterion-float-upper-bound-" ++ elementDetail.id)
                 "Upper Bound"
                 upperBound
                 |> Html.map UpperBoundMsg
@@ -197,24 +268,25 @@ view { elementDetail, queryTypeSelect, lowerBound, upperBound } =
             Html.div [ Attr.class "bound-placeholder" ] []
 
         inputs =
-            case queryTypeSelect.value of
-                Just "lessThan" ->
-                    [ upperBoundInput Normal, placeholder ]
+            case queryType of
+                LessThan ->
+                    [ upperBoundInput NormalBound, placeholder ]
 
-                Just "greaterThan" ->
-                    [ lowerBoundInput Normal, placeholder ]
+                GreaterThan ->
+                    [ lowerBoundInput NormalBound, placeholder ]
 
-                Just "between" ->
-                    [ lowerBoundInput Normal, upperBoundInput Normal ]
+                Between ->
+                    [ lowerBoundInput NormalBound
+                    , upperBoundInput NormalBound
+                    ]
 
-                Just "outside" ->
-                    [ lowerBoundInput Outside, upperBoundInput Outside ]
-
-                _ ->
-                    [ placeholder, placeholder ]
+                Outside ->
+                    [ lowerBoundInput OutsideBound
+                    , upperBoundInput OutsideBound
+                    ]
     in
     Dialog.content []
-        (description elementDetail :: viewQueryTypeSelect queryTypeSelect :: inputs)
+        (description elementDetail :: viewQueryTypeSelector queryType :: inputs)
 
 
 description elementDetail =
@@ -227,25 +299,35 @@ description elementDetail =
         [ Html.text <| appendUnit "Metric item" ++ "." ]
 
 
-viewQueryTypeSelect model =
+viewQueryTypeSelector : QueryType -> Html Msg
+viewQueryTypeSelector currentQueryType =
     let
-        option value label =
-            Html.option
-                [ Attr.value value
-                , Attr.selected (model.value == Just value)
+        button queryType normalLabel phoneLabel =
+            Button.view
+                [ Options.class normalLabel
+                , if queryType == currentQueryType then
+                    Button.unelevated
+
+                  else
+                    Button.outlined
+                , Options.onClick <| SelectQueryType queryType
                 ]
-                [ Html.text label ]
+                [ Html.span
+                    [ Attr.class "text--desktop" ]
+                    [ Html.text normalLabel ]
+                , Html.span
+                    [ Attr.class "text--tablet" ]
+                    [ Html.text phoneLabel ]
+                , Html.span
+                    [ Attr.class "text--phone" ]
+                    [ Html.text phoneLabel ]
+                ]
     in
-    Select.view QueryTypeMsg
-        model
-        [ Options.class "query-type-select"
-        , Options.id "criterion-float-query-type-select"
-        , Select.label "Query Type"
-        ]
-        [ option "lessThan" "Smaller"
-        , option "greaterThan" "Bigger"
-        , option "between" "Between"
-        , option "outside" "Outside"
+    Html.div [ Attr.class "query-type-selector" ]
+        [ button LessThan "Less Than" "<"
+        , button GreaterThan "Greater Than" ">"
+        , button Between "Between" "Between"
+        , button Outside "Outside" "Outside"
         ]
 
 

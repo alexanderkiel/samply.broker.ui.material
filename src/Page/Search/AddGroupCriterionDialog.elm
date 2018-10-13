@@ -1,7 +1,7 @@
 module Page.Search.AddGroupCriterionDialog exposing
-    ( Model
-    , Msg
+    ( Model(..)
     , init
+    , Msg(..)
     , update
     , view
     )
@@ -9,12 +9,30 @@ module Page.Search.AddGroupCriterionDialog exposing
 {-| This module contains a dialog for choosing one data element out of a list
 of data elements out of a data element group.
 
-    The dialog maintains internal state, so one has to call the `update`
-    function with messages supplied though the function of the `map` record
-    of the config.
+The dialog maintains internal state, so one has to call the `update`
+function with messages supplied though the function of the `map` record
+of the config.
+
+
+# Model
+
+@docs Model
+@docs init
+
+
+# Update
+
+@docs Msg
+@docs update
+
+
+# View
+
+@docs view
 
 -}
 
+import Browser.Dom as Dom
 import Data.LoadingStatus as LoadingStatus exposing (LoadingStatus(..))
 import Data.Mdr.DataElement exposing (DataElement, DataElementDetail)
 import Data.Mdr.DataElementGroup exposing (DataElementGroup)
@@ -22,6 +40,7 @@ import Data.Search.Criterion as Criterion exposing (Criterion)
 import Data.Urn exposing (Urn)
 import Html exposing (Html)
 import Html.Attributes as Attr
+import List.Selection as Selection
 import Material.Button as Button
 import Material.CircularProgress as CircularProgress
 import Material.Dialog as Dialog
@@ -38,27 +57,46 @@ import Task
 type Model
     = SelectItem
         { mdrRoot : String
-        , usedMdrKeys : List Urn
-        , selectedItemId : Maybe Urn
+        , selection : Selection
         }
-    | LoadingDataElementDetail Urn
-    | LoadingDataElementDetailSlowly Urn
+    | LoadingDataElementDetail Selection
+    | LoadingDataElementDetailSlowly Selection
     | CreateCriterion CriterionForm.Model
+
+
+type alias Selection =
+    Selection.Selection ( DataElement, Bool )
 
 
 {-| Initializes the model.
 
-    The data elements with identifiers contained in `usedMdrKeys` will be
+    The data elements with identifiers contained in `usedMemberIds` will be
     disabled, so that the user can't select one data element twice.
 
 -}
-init : String -> List Urn -> Model
-init mdrRoot usedMdrKeys =
+init : String -> List Urn -> List DataElement -> Model
+init mdrRoot usedMemberIds members =
+    let
+        selection =
+            members
+                |> tagMembers usedMemberIds
+                |> Selection.fromList
+                |> Selection.selectBy Tuple.second
+    in
     SelectItem
         { mdrRoot = mdrRoot
-        , usedMdrKeys = usedMdrKeys
-        , selectedItemId = Nothing
+        , selection = selection
         }
+
+
+tagMember : List Urn -> DataElement -> ( DataElement, Bool )
+tagMember usedMdrKeys member =
+    ( member, List.member member.id usedMdrKeys |> not )
+
+
+tagMembers : List Urn -> List DataElement -> List ( DataElement, Bool )
+tagMembers usedMdrKeys =
+    List.map (tagMember usedMdrKeys)
 
 
 
@@ -67,10 +105,12 @@ init mdrRoot usedMdrKeys =
 
 type Msg
     = SelectElement Urn
-    | Next Urn
+    | Next
     | DataElementDetailLoaded Urn (Result Request.Error DataElementDetail)
     | PassedSlowLoadThreshold
     | CommonMsg CriterionForm.Msg
+    | FocusSelectedMember
+    | NoOp
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -78,24 +118,37 @@ update msg model =
     case msg of
         SelectElement id ->
             case model of
-                SelectItem selectItemModel ->
-                    ( SelectItem { selectItemModel | selectedItemId = Just id }
+                SelectItem ({ selection } as selectItemModel) ->
+                    let
+                        newSelection =
+                            Selection.selectBy
+                                (\( member, selectable ) ->
+                                    id == member.id && selectable
+                                )
+                                selection
+                    in
+                    ( SelectItem { selectItemModel | selection = newSelection }
                     , Cmd.none
                     )
 
                 _ ->
                     ( model, Cmd.none )
 
-        Next selectedItemId ->
+        Next ->
             case model of
-                SelectItem { mdrRoot } ->
-                    ( LoadingDataElementDetail selectedItemId
-                    , Cmd.batch
-                        [ loadElementDetail mdrRoot selectedItemId
-                        , Task.perform (\_ -> PassedSlowLoadThreshold)
-                            LoadingStatus.slowThreshold
-                        ]
-                    )
+                SelectItem { mdrRoot, selection } ->
+                    case getSelectedMember selection of
+                        Just selectedMember ->
+                            ( LoadingDataElementDetail selection
+                            , Cmd.batch
+                                [ loadElementDetail mdrRoot selectedMember.id
+                                , Task.perform (\_ -> PassedSlowLoadThreshold)
+                                    LoadingStatus.slowThreshold
+                                ]
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -103,9 +156,9 @@ update msg model =
         DataElementDetailLoaded elementId result ->
             case result of
                 Ok element ->
-                    ( CreateCriterion <| CriterionForm.init element Nothing
-                    , Cmd.none
-                    )
+                    CriterionForm.init element Nothing
+                        |> CriterionForm.focusFirstInput
+                        |> Tuple.mapBoth CreateCriterion (Cmd.map CommonMsg)
 
                 Err error ->
                     ( model
@@ -114,8 +167,8 @@ update msg model =
 
         PassedSlowLoadThreshold ->
             ( case model of
-                LoadingDataElementDetail selectedItemId ->
-                    LoadingDataElementDetailSlowly selectedItemId
+                LoadingDataElementDetail selection ->
+                    LoadingDataElementDetailSlowly selection
 
                 _ ->
                     model
@@ -125,12 +178,30 @@ update msg model =
         CommonMsg commonMsg ->
             case model of
                 CreateCriterion commonModel ->
-                    ( CreateCriterion <| CriterionForm.update commonMsg commonModel
-                    , Cmd.none
-                    )
+                    CriterionForm.update commonMsg commonModel
+                        |> Tuple.mapBoth CreateCriterion (Cmd.map CommonMsg)
 
                 _ ->
                     ( model, Cmd.none )
+
+        FocusSelectedMember ->
+            case model of
+                SelectItem { selection } ->
+                    case getSelectedMember selection of
+                        Just selectedMember ->
+                            ( model
+                            , Dom.focus (htmlMemberId selectedMember.id)
+                                |> Task.attempt (\_ -> NoOp)
+                            )
+
+                        Nothing ->
+                            ( model, Cmd.none )
+
+                _ ->
+                    ( model, Cmd.none )
+
+        NoOp ->
+            ( model, Cmd.none )
 
 
 loadElementDetail : String -> Urn -> Cmd Msg
@@ -165,11 +236,10 @@ view :
     Config msg
     -> Model
     -> DataElementGroup
-    -> LoadingStatus (List DataElement)
     -> Bool
     -> Bool
     -> Html msg
-view { onOk, onCancel, map } model { id, designation } loadingMembers open okButtonDisabled =
+view { onOk, onCancel, map } model { id, designation } open okButtonDisabled =
     let
         title =
             case model of
@@ -189,18 +259,19 @@ view { onOk, onCancel, map } model { id, designation } loadingMembers open okBut
     in
     Dialog.view [ Options.when open Dialog.open, scrollable ]
         [ Dialog.container []
-            [ Dialog.surface [ Options.class "mdc-dialog__surface--constant-width" ]
+            [ Dialog.surface
+                [ Options.class "mdc-dialog__surface--constant-width" ]
                 [ Options.styled Html.h2
                     [ Dialog.title ]
                     [ Html.text title ]
-                , body model loadingMembers
+                , body model id
                     |> Html.map map
                 , Dialog.actions
                     [ Button.view [ Dialog.button, Options.onClick onCancel ]
                         [ Html.text "Cancel" ]
                     , case model of
-                        SelectItem { selectedItemId } ->
-                            nextButton selectedItemId |> Html.map map
+                        SelectItem { selection } ->
+                            nextButton (getSelectedMember selection) |> Html.map map
 
                         LoadingDataElementDetail _ ->
                             waitingNextButton False
@@ -219,13 +290,18 @@ view { onOk, onCancel, map } model { id, designation } loadingMembers open okBut
         ]
 
 
-nextButton selectedItemId =
+getSelectedMember : Selection -> Maybe DataElement
+getSelectedMember selection =
+    Selection.selected selection
+        |> Maybe.map Tuple.first
+
+
+nextButton selectedMember =
     Button.view
         [ Dialog.button
         , Button.unelevated
-        , Maybe.map (Options.onClick << Next) selectedItemId
-            |> Maybe.withDefault Options.noOp
-        , Button.disabled <| selectedItemId == Nothing
+        , Options.onClick Next
+        , Button.disabled (selectedMember == Nothing)
         , primaryButtonWidth
         ]
         [ Html.text "Next" ]
@@ -258,49 +334,56 @@ okButton onOk criterion okButtonDisabled =
         [ Html.text "Ok" ]
 
 
-body model loadingMembers =
+body : Model -> Urn -> Html Msg
+body model groupId =
     case model of
-        SelectItem { usedMdrKeys, selectedItemId } ->
-            selectItemBody usedMdrKeys selectedItemId False loadingMembers
+        SelectItem { selection } ->
+            selectItemBody False selection
 
-        LoadingDataElementDetail selectedItemId ->
-            selectItemBody [] (Just selectedItemId) True loadingMembers
+        LoadingDataElementDetail selection ->
+            selectItemBody True selection
 
-        LoadingDataElementDetailSlowly selectedItemId ->
-            selectItemBody [] (Just selectedItemId) True loadingMembers
+        LoadingDataElementDetailSlowly selection ->
+            selectItemBody True selection
 
         CreateCriterion form ->
             CriterionForm.view form |> Html.map CommonMsg
 
 
-selectItemBody : List Urn -> Maybe Urn -> Bool -> LoadingStatus (List DataElement) -> Html Msg
-selectItemBody usedMdrKeys selectedItemId disabled loadingMembers =
+selectItemBody : Bool -> Selection -> Html Msg
+selectItemBody allDisabled selection =
     Dialog.content [] <|
-        case loadingMembers of
-            Loaded elements ->
-                List.map (elementItem usedMdrKeys selectedItemId disabled) elements
-
-            _ ->
-                [ Html.text "" ]
+        markSelected (elementItem allDisabled) selection
 
 
-elementItem : List Urn -> Maybe Urn -> Bool -> DataElement -> Html Msg
-elementItem usedMdrKeys selectedItemId allDisabled { id, designation } =
+markSelected : (Bool -> a -> b) -> Selection.Selection a -> List b
+markSelected f =
+    Selection.mapSelected { selected = f True, rest = f False }
+        >> Selection.toList
+
+
+elementItem : Bool -> Bool -> ( DataElement, Bool ) -> Html Msg
+elementItem allDisabled selected ( { id, designation }, selectable ) =
     let
         disabled =
-            allDisabled || List.member id usedMdrKeys
+            allDisabled || not selectable
     in
     Html.div [ Attr.class "form-field-container" ]
         [ FormField.view
-            [ Options.when (not disabled) <| Options.onClick <| SelectElement id
+            [ Options.onClick (SelectElement id)
             ]
             [ RadioButton.view
-                [ RadioButton.checked <| Just id == selectedItemId
+                [ Options.id (htmlMemberId id)
+                , RadioButton.checked selected
                 , RadioButton.disabled disabled
                 ]
                 []
             , Options.styled Html.label
-                [ Options.when disabled <| Options.class "label-disabled" ]
+                [ Options.class "label-disabled" |> Options.when disabled ]
                 [ Html.text designation ]
             ]
         ]
+
+
+htmlMemberId id =
+    "add-group-criterion-dialog-member-" ++ id
