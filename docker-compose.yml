@@ -1,13 +1,13 @@
 version: '3.2'
 services:
   search-store:
-    image: akiel/samply.broker.search.store:latest
+    image: akiel/samply.broker.search.store:event-stream
     environment:
       PORT: "80"
       DATABASE_URI: "datomic:mem://store"
     restart: always
   ui:
-    image: akiel/samply.broker.ui.material:latest
+    image: akiel/samply.broker.ui.material:event-stream
     environment:
       SEARCH_STORE_ROOT: "http://search-store"
       MDR_ROOT: "https://mdr.germanbiobanknode.de/v3/api/mdr"
