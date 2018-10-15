@@ -372,11 +372,6 @@ update msg model =
                     )
 
 
-isDataElementRelevant : DataElement -> Bool
-isDataElementRelevant { designation } =
-    String.contains "ID" designation |> not
-
-
 markAsSlowLoading loadingModel =
     case loadingModel of
         SearchLoaded mdrRoot search ->
@@ -957,6 +952,27 @@ relevantGroup { id } =
     List.member id groupBlacklist |> not
 
 
+elementBlacklist : List Urn
+elementBlacklist =
+    [ "urn:mdr16:dataelement:21:1"
+    , "urn:mdr16:dataelement:22:1"
+    , "urn:mdr16:dataelement:24:1"
+    , "urn:mdr16:dataelement:11:1"
+    , "urn:mdr16:dataelement:12:1"
+    , "urn:mdr16:dataelement:13:1"
+    , "urn:mdr16:dataelement:14:1"
+    , "urn:mdr16:dataelement:25:1"
+    , "urn:mdr16:dataelement:26:1"
+    , "urn:mdr16:dataelement:27:1"
+    , "urn:mdr16:dataelement:34:1"
+    ]
+
+
+isDataElementRelevant : DataElement -> Bool
+isDataElementRelevant { id } =
+    List.member id elementBlacklist |> not
+
+
 loadDataElementGroupMembers : String -> Urn -> Cmd Msg
 loadDataElementGroupMembers mdrRoot groupId =
     Request.Mdr.dataElementGroupMembers mdrRoot groupId
@@ -997,8 +1013,7 @@ appBar : String -> Html msg
 appBar name =
     TopAppBar.view []
         [ TopAppBar.section [ TopAppBar.alignStart ]
-            [ TopAppBar.navigationIcon "menu"
-            , TopAppBar.title name
+            [ TopAppBar.title name
             ]
         ]
 
@@ -1235,7 +1250,6 @@ criterionItem ( { mdrKey, query, loadingCriterionDetail }, { designation } ) =
             [ List.primaryText [] [ Html.text designation ]
             , List.secondaryText [] [ Html.text queryText ]
             ]
-        , Icon.view [ List.meta ] "delete"
         ]
     )
 

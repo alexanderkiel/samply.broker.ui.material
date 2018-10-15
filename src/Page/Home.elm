@@ -127,8 +127,7 @@ appBar : Html msg
 appBar =
     TopAppBar.view []
         [ TopAppBar.section [ TopAppBar.alignStart ]
-            [ TopAppBar.navigationIcon "menu"
-            , TopAppBar.title "Search Broker"
+            [ TopAppBar.title "Search Broker"
             ]
         ]
 
