@@ -20,7 +20,7 @@ Clone this Git repository, if you haven't already:
 git clone https://github.com/alexanderkiel/samply.broker.ui.material.git
 ```
 
-Make sure you have port 8080 free or edit the `docker-compose.yml` before brining the system up with:
+Make sure you have port 8080 free or edit the `docker-compose.yml` before bringing the system up with:
 
 ```bash
 docker-compose up
