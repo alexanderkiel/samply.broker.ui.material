@@ -248,16 +248,8 @@ view { onOk, onCancel, map } model { id, designation } open okButtonDisabled =
 
                 _ ->
                     "Choose " ++ designation ++ " Criterion"
-
-        scrollable =
-            case model of
-                CreateCriterion form ->
-                    Options.noOp
-
-                _ ->
-                    Dialog.scrollable
     in
-    Dialog.view [ Options.when open Dialog.open, scrollable ]
+    Dialog.view [ Options.when open Dialog.open ]
         [ Dialog.container []
             [ Dialog.surface
                 [ Options.class "mdc-dialog__surface--constant-width" ]
