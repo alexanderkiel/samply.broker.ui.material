@@ -49,7 +49,7 @@ docker build .
 
 * install [npm][2]
 * run `npm install` to install the required node packages
-* run the search store on port 8080: `docker run -p 8080:8080 -e PORT="8080" -e DATABASE_URI="datomic:mem://store" akiel/samply.broker.ui.material:latest`
+* run the search store on port 8080: `docker run -p 8080:8080 -e PORT="8080" -e DATABASE_URI="datomic:mem://store" akiel/samply.broker.search.store:latest`
 * run `npm run dev` to run an interactive development environment with hot reloading
 * open [http://localhost:3000](http://localhost:3000) in your browser
 
